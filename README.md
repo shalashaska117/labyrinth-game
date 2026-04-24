@@ -1,5 +1,4 @@
-# LSO — Labirinto con oggetti e uscita
-
+# Labyrinth game
 Client-server multiplayer maze game written in C, using TCP sockets and pthreads.
 
 ## Project structure
