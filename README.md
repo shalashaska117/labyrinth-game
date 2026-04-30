@@ -1,48 +1,23 @@
-# Labyrinth game
-Client-server multiplayer maze game written in C, using TCP sockets and pthreads.
+# Labyrinth Game - Persona B
 
-## Project structure
+Client-side, protocol, UI, Docker scripts and tests for the LSO multiplayer labyrinth project.
 
-```
-├── src/               # C source files (server.c, client.c)
-├── TracciaA-LSO-2025.pdf
-├── roadmap_notebooklm.pdf
-├── Makefile           # Build with gcc on Linux
-├── Dockerfile         # Multi-stage: builder, server, client targets
-├── docker-compose.yml # Orchestrated dev environment
-└── .gitignore
-```
-
-## Quick start with Docker (cross-platform)
-
-### Build and run the server
+## Build
 
 ```bash
-docker compose up server
+make debug
 ```
 
-The server listens on port `8080` by default.
-
-### Run a client (in another terminal)
+## Run tests
 
 ```bash
-docker compose run --rm client
+make test
 ```
 
-This connects to the `server` container on port `8080`.
-
-### Build locally (Linux/macOS)
+## Docker
 
 ```bash
-make all
-./bin/server
-./bin/client <server-addr> <port>
+bash scripts/build.sh
+bash scripts/run_server.sh
+bash scripts/run_client.sh
 ```
-
-## Requirements
-
-The server requires a UNIX-like environment. On Windows, use Docker or WSL.
-
-## Protocol
-
-See `TracciaA-LSO-2025.pdf` for the application-level protocol specification.

@@ -1,23 +1,11 @@
-# Build artifacts
-bin/
-build/
-*.o
-*.a
-*.so
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Docker
-.env
-
-# Logs
-*.log
+client_app
+server_app
+test_command_parser
+test_state
+test_response_tcp
+*.gcda
+*.gcno
+*.gcov
+coverage.info
+coverage_report/
+logs/
