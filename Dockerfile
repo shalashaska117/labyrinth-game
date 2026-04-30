@@ -5,6 +5,6 @@ WORKDIR /app
 COPY . .
 
 RUN make clean || true
-RUN make debug
+RUN make release
 
 CMD ["./server_app", "5000"]

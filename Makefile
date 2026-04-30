@@ -1,4 +1,4 @@
-.PHONY: all debug release client server test test-command test-state test-response-tcp coverage lcov lcov-report valgrind-test-command valgrind-test-state valgrind-test-response valgrind-client valgrind-server clean
+.PHONY: all debug release client server test test-command test-state test-response-tcp coverage lcov lcov-report valgrind-test-command valgrind-test-state valgrind-test-response valgrind-client valgrind-server run-client run-server clean
 
 CC=gcc
 
@@ -34,10 +34,10 @@ debug: client server
 release: CFLAGS += $(RELEASE_FLAGS)
 release: client server
 
-client:
+client: $(CLIENT_SRC)
 	$(CC) $(CFLAGS) -o $(CLIENT_BIN) $(CLIENT_SRC)
 
-server:
+server: $(SERVER_SRC)
 	$(CC) $(CFLAGS) -o $(SERVER_BIN) $(SERVER_SRC) $(PTHREAD_FLAGS)
 
 test-command:
@@ -62,7 +62,7 @@ coverage: clean
 	$(CC) $(CFLAGS) $(COVERAGE_FLAGS) -o $(TEST_RESPONSE_TCP_BIN) $(TEST_RESPONSE_TCP_SRC)
 
 lcov: coverage
-	@echo "Run tests first with: ./test_command_parser && ./test_state && ./test_response_tcp"
+	@echo "Run tests first with: ./$(TEST_COMMAND_BIN) && ./$(TEST_STATE_BIN) && ./$(TEST_RESPONSE_TCP_BIN)"
 	@echo "Then execute: make lcov-report"
 
 lcov-report:
@@ -85,10 +85,17 @@ valgrind-client: debug
 valgrind-server: debug
 	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./$(SERVER_BIN) 5000
 
+run-client: client
+	./$(CLIENT_BIN) 127.0.0.1 5000
+
+run-server: server
+	./$(SERVER_BIN) 5000
+
 clean:
 	rm -f $(CLIENT_BIN) $(SERVER_BIN)
 	rm -f $(TEST_COMMAND_BIN) $(TEST_STATE_BIN) $(TEST_RESPONSE_TCP_BIN)
-	rm -f *.gcda *.gcno *.gcov coverage.info
+	rm -f *.o
 	find . -name "*.gcda" -delete
 	find . -name "*.gcno" -delete
+	rm -f *.gcov coverage.info
 	rm -rf coverage_report
