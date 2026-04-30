@@ -1,23 +1,75 @@
-# Build artifacts
-bin/
-build/
+# =========================
+# BINARIES / EXECUTABLES
+# =========================
+client_app
+server_app
+test_command_parser
+test_state
+test_response_tcp
+
+# Generic executables (Linux/Windows)
+*.out
+*.exe
+*.app
+
+# =========================
+# C BUILD FILES
+# =========================
 *.o
 *.a
 *.so
 
-# IDE
-.vscode/
-.idea/
+# =========================
+# COVERAGE / GCOV / LCOV
+# =========================
+*.gcda
+*.gcno
+*.gcov
+coverage.info
+coverage_report/
+
+# =========================
+# LOG FILES
+# =========================
+logs/
+*.log
+
+# =========================
+# TEMP FILES
+# =========================
+*~
 *.swp
 *.swo
-*~
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Docker
+# =========================
+# ENV / SENSITIVE CONFIG
+# =========================
 .env
+.env.*
+!.env.example
 
-# Logs
-*.log
+# =========================
+# DOCKER
+# =========================
+docker-compose.override.yml
+
+# =========================
+# IDE / EDITOR
+# =========================
+
+# VSCode
+.vscode/
+
+# CLion / IntelliJ
+.idea/
+cmake-build-*/
+
+# =========================
+# OS FILES
+# =========================
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db

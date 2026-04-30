@@ -1,30 +1,17 @@
 services:
   server:
-    build:
-      context: .
-      target: server
+    build: .
+    container_name: labyrinth_server
+    command: ./server_app 5000
     ports:
-      - "8080:8080"
+      - "5000:5000"
     volumes:
-      - ./logs:/var/log/lso
-    networks:
-      - lso-net
-    restart: unless-stopped
+      - ./logs:/app/logs
 
   client:
-    build:
-      context: .
-      target: client
-    profiles:
-      - client
+    build: .
+    entrypoint: ["./client_app"]
     depends_on:
       - server
     stdin_open: true
     tty: true
-    networks:
-      - lso-net
-    command: ["client", "server", "8080"]
-
-networks:
-  lso-net:
-    driver: bridge
