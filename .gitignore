@@ -73,3 +73,7 @@ cmake-build-*/
 
 # Windows
 Thumbs.db
+
+
+#OpenCode
+.memsearch/*
