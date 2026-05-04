@@ -14,6 +14,11 @@
 #define VIEW_RADIUS 2
 
 /*
+ * Number of objects placed randomly in the maze.
+ */
+#define OBJECT_COUNT 15
+
+/*
  * Maximum number of users printed by the client when receiving
  * a USERS response from the server.
  */
