@@ -19,6 +19,16 @@
 #define OBJECT_COUNT 15
 
 /*
+ * Interval in seconds between periodic global map broadcasts.
+ */
+#define T_INTERVAL 5
+
+/*
+ * Maximum size for protocol buffers.
+ */
+#define BUFFER_SIZE 4096
+
+/*
  * Maximum number of users printed by the client when receiving
  * a USERS response from the server.
  */

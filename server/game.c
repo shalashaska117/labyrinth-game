@@ -41,19 +41,24 @@ static void carve(cell_t maze[MAP_HEIGHT][MAP_WIDTH], int x, int y) {
  * Will randomically place the exit at the border of the labyrinth
  * */
 static void place_exit(cell_t maze[MAP_HEIGHT][MAP_WIDTH]) {
+    int side = rand() % 4;
     int ex, ey;
-    do {
-        int side = rand() % 4;
-        switch (side) {
-            case 0: ex = rand() % MAP_WIDTH;  ey = 0;                break;
-            case 1: ex = rand() % MAP_WIDTH;  ey = MAP_HEIGHT - 1;   break;
-            case 2: ex = 0;                   ey = rand() % MAP_HEIGHT; break;
-            case 3: ex = MAP_WIDTH - 1;       ey = rand() % MAP_HEIGHT; break;
-        }
-    } while (maze[ey][ex].tile != TILE_EMPTY);
+    switch (side) {
+        case 0: ex = (rand() % ((MAP_WIDTH - 3) / 2)) * 2 + 1; ey = 1; break;
+        case 1: ex = (rand() % ((MAP_WIDTH - 3) / 2)) * 2 + 1; ey = MAP_HEIGHT - 2; break;
+        case 2: ex = 1; ey = (rand() % ((MAP_HEIGHT - 3) / 2)) * 2 + 1; break;
+        case 3: ex = MAP_WIDTH - 2; ey = (rand() % ((MAP_HEIGHT - 3) / 2)) * 2 + 1; break;
+    }
 
     maze[ey][ex].tile = TILE_EXIT;
     maze[ey][ex].is_exit = 1;
+
+    switch (side) {
+        case 0: maze[0][ex].tile = TILE_EMPTY; break;
+        case 1: maze[MAP_HEIGHT - 1][ex].tile = TILE_EMPTY; break;
+        case 2: maze[ey][0].tile = TILE_EMPTY; break;
+        case 3: maze[ey][MAP_WIDTH - 1].tile = TILE_EMPTY; break;
+    }
 }
 
 int game_init(cell_t maze[MAP_HEIGHT][MAP_WIDTH]) {
