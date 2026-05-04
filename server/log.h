@@ -1,9 +1,8 @@
 #ifndef LOG_H
 #define LOG_H
 
-/*
- * Placeholder header for Persona A logging logic.
- */
-void log_placeholder(void);
+int log_init(const char *path);
+int log_msg(const char *message);
+int log_close(void);
 
 #endif
