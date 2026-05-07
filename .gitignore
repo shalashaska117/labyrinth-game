@@ -29,9 +29,16 @@ coverage.info
 coverage_report/
 
 # =========================
+# VALGRIND
+# =========================
+valgrind-*.log
+vgcore.*
+
+# =========================
 # LOG FILES
 # =========================
-logs/
+logs/*
+!logs/.gitkeep
 *.log
 
 # =========================
@@ -40,6 +47,16 @@ logs/
 *~
 *.swp
 *.swo
+*.bak
+
+# =========================
+# PATCH / ARCHIVES
+# =========================
+*.patch
+*.diff
+*.zip
+*.tar
+*.tar.gz
 
 # =========================
 # ENV / SENSITIVE CONFIG
@@ -74,6 +91,7 @@ cmake-build-*/
 # Windows
 Thumbs.db
 
-
-#OpenCode
-.memsearch/*
+# =========================
+# OpenCode
+# =========================
+.memsearch/
