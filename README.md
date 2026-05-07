@@ -1,147 +1,232 @@
-# Labyrinth Multiplayer Game (Client-Server in C)
+# Labyrinth Game
 
-## Introduction
+A C client-server labyrinth game for Unix/Linux systems, developed as an Operating Systems laboratory project.
 
-This project implements a multiplayer labyrinth exploration game using a client-server architecture in C on a Unix/Linux environment.
+The project implements a multiplayer TCP labyrinth in which users connect to a server, wait in a lobby, start a timed session, explore a generated maze, collect objects, reach the exit, and view a final ranking.
 
-Multiple users can connect to a central server and explore a randomly generated 2D maze. Each player can move inside the map, collect objects, and try to reach an exit. The server maintains the full game state, while each client only sees a partial view based on discovered cells.
+## Documentation
 
-Communication between client and server is done through TCP sockets using a custom text-based protocol.
+- [View the project documentation](docs/documentation.pdf)
+- [Download the project documentation](docs/documentation.pdf)
 
-The project is developed following a modular approach and uses only standard C libraries and system calls covered in the course.
+## Overview
 
----
+The application is divided into two main programs:
 
-## Features
+- `server_app`: manages clients, lobby state, game sessions, maze generation, player state, scoring and rankings.
+- `client_app`: connects to the server, sends commands, receives protocol responses and renders a terminal interface.
 
-- TCP client-server communication
-- Support for multiple simultaneous clients
-- Text-based protocol for commands and responses
-- Local map view (based on discovered cells)
-- Global masked map view
-- User authentication (login/register)
-- Command parsing and response handling
-- Terminal-based user interface
-- Automated tests for client logic
-- Memory checks with Valgrind
-- Code coverage support (lcov)
-- Docker support for easy execution
+The communication between client and server is based on a simple line-oriented text protocol over TCP sockets.
 
----
+## Main Features
 
-## Project Structure
+- TCP client-server architecture.
+- Multiplayer lobby with session owner.
+- Ready/start workflow.
+- Timed gameplay session.
+- Local and global map views.
+- Per-player visibility.
+- Object collection.
+- Exit detection.
+- Final ranking.
+- Reset from finished state back to lobby.
+- Persistent terminal UI.
+- Command mode and movement mode.
+- Automated tests.
+- LCOV coverage report generation.
+- Valgrind targets.
+- Docker support.
 
-```
+## Technologies and Constraints
+
+The project is written in C and uses Unix/POSIX primitives.
+
+Main primitives and tools used:
+
+- `socket`, `bind`, `listen`, `accept`, `connect`
+- `send`, `recv`, `read`, `write`, `close`
+- `getaddrinfo`
+- `select`
+- `pthread`
+- mutexes
+- `termios` on the client side only
+- Makefile
+- Valgrind
+- LCOV
+- Docker / Docker Compose
+
+The project intentionally avoids external libraries and terminal UI frameworks such as `ncurses`.
+
+## Repository Structure
+
+```text
 .
-├── client/
-├── server/
-├── common/
-├── tests/
-├── scripts/
-├── logs/
-├── Dockerfile
-├── docker-compose.yml
+├── client/              Client-side logic, UI, command translation and response parsing
+├── common/              Shared protocol helpers and constants
+├── server/              Server, game logic, session management and logging
+├── tests/               Automated tests
+├── docs/                Project documentation
+├── scripts/             Utility scripts
+├── logs/                Runtime logs, ignored except for .gitkeep
 ├── Makefile
-└── README.md
+├── Dockerfile
+└── docker-compose.yml
 ```
 
----
+## Build
 
-## Requirements
+Build client and server in debug mode:
 
-- Linux or WSL
-- gcc
-- make
-- valgrind (optional)
-- lcov (optional)
-- Docker and Docker Compose
-
----
-
-## Build Instructions
-
-```
+```bash
 make debug
+```
+
+Build optimized binaries:
+
+```bash
 make release
-make clean
 ```
 
----
+Show all available Makefile targets:
 
-## Running with Docker
-
-```
-docker compose up server
-docker compose run --rm client server 5000
+```bash
+make help
 ```
 
----
+## Run
 
-## Client Commands
+Start the server:
 
+```bash
+./server_app 5000
 ```
-login <username> <password>
-register <username> <password>
-w s a d
+
+Start a client:
+
+```bash
+./client_app 127.0.0.1 5000
+```
+
+Multiple clients can be started in separate terminals.
+
+## Basic Usage
+
+After connecting, use command mode to register or log in:
+
+```text
+register pietro secret
+login pietro secret
+```
+
+Useful commands:
+
+```text
+ready
+start
+users
 local
 global
-users
-help
+rank
+reset
 quit
 ```
 
----
+During gameplay, press `TAB` to switch between command mode and movement mode.
 
-## Protocol Example
+Movement mode keys:
 
+```text
+W  move up
+A  move left
+S  move down
+D  move right
+G  toggle/request global map
+L  request local map
+Q  quit
 ```
-MAP LOCAL 3 3
-###
-#P#
-###
-END
+
+## Game Lifecycle
+
+The server manages three states:
+
+```text
+LOBBY
+PLAYING
+FINISHED
 ```
 
----
+In the lobby, players can connect, register, log in and mark themselves ready.  
+The first connected client becomes the session owner. Only the owner can start the session.
+
+During gameplay, players explore the maze, collect objects and try to reach the exit.
+
+When the session finishes, the ranking remains available. The owner can reset the session back to the lobby.
+
+## Ranking
+
+The ranking is ordered by:
+
+1. players who reached the exit;
+2. earliest exit time;
+3. highest number of collected objects.
+
+This means that reaching the exit has priority over simply collecting more objects.
 
 ## Testing
 
-```
+Run all automated tests:
+
+```bash
 make test
 ```
 
----
+Run all automated tests under Valgrind:
 
-## Valgrind
-
-```
-make valgrind-test-command
-make valgrind-test-state
-make valgrind-test-response
+```bash
+make valgrind-test
 ```
 
----
+Generate the LCOV coverage report:
 
-## Coverage
-
-```
-make coverage
-./test_command_parser
-./test_state
-./test_response_tcp
-make lcov-report
+```bash
+make lcov
 ```
 
----
+On WSL, generate and open the report:
+
+```bash
+make lcov-open
+```
+
+The generated report is stored in:
+
+```text
+coverage_report/index.html
+```
+
+## Cleaning
+
+Remove generated binaries, test executables and coverage files:
+
+```bash
+make clean
+```
+
+Remove runtime logs while preserving `logs/.gitkeep`:
+
+```bash
+make clean-logs
+```
+
+## Docker
+
+Build and run with Docker Compose:
+
+```bash
+docker compose up --build
+```
 
 ## Notes
 
-- Server does not read from stdin
-- Protocol is line-based with END delimiter
-- Client supports hostname "server" in Docker
-
----
-
-## Conclusion
-
-This project demonstrates a complete client-server system in C using sockets, select(), and a modular design.
+This repository contains the source code and technical assets of the project.  
+The complete academic documentation is provided separately in `docs/documentation.pdf`.
