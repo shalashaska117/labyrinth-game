@@ -218,11 +218,138 @@ make clean-logs
 
 ## Docker
 
-Build and run with Docker Compose:
+The project includes Docker support through `Dockerfile` and `docker-compose.yml`.
+
+Docker is mainly intended to run the server in a reproducible containerized environment. The recommended workflow is to run the server with Docker Compose and run the clients from a native Linux/WSL terminal, because the client uses `termios` for interactive terminal input.
+
+### Recommended Workflow: Server in Docker, Clients from WSL/Linux
+
+Start the server with Docker Compose:
+
+```bash
+docker compose up --build server
+```
+
+The server listens on port `5000`, exposed on the host as:
+
+```text
+127.0.0.1:5000
+```
+
+Then, from another Linux/WSL terminal, build and run the client:
+
+```bash
+make debug
+./client_app 127.0.0.1 5000
+```
+
+To start additional players, open other Linux/WSL terminals and run:
+
+```bash
+./client_app 127.0.0.1 5000
+```
+
+### Fully Docker-Based Execution
+
+The client can also be started inside Docker Compose.
+
+First, start the server:
+
+```bash
+docker compose up --build server
+```
+
+Then, from another terminal, start a client container:
+
+```bash
+docker compose run --rm client server 5000
+```
+
+Inside the Docker Compose network, the hostname `server` refers to the server service.
+
+### Generic Docker Compose Start
+
+Running:
 
 ```bash
 docker compose up --build
 ```
+
+builds and starts both services. With the current `docker-compose.yml`, the client service is defined as:
+
+```yaml
+client:
+  build: .
+  entrypoint: ["./client_app"]
+  depends_on:
+    - server
+  stdin_open: true
+  tty: true
+```
+
+Since `client_app` requires the server host and port as command-line arguments:
+
+```text
+./client_app <host> <port>
+```
+
+starting all services with the generic command may show:
+
+```text
+Usage: ./client_app <host> <port>
+```
+
+For this reason, either start the client explicitly with:
+
+```bash
+docker compose run --rm client server 5000
+```
+
+or add a default command to the client service:
+
+```yaml
+client:
+  build: .
+  entrypoint: ["./client_app"]
+  command: ["server", "5000"]
+  depends_on:
+    - server
+  stdin_open: true
+  tty: true
+```
+
+Even with this configuration, the recommended development workflow remains running the server in Docker and the clients from WSL/Linux.
+
+### Stop Docker Services
+
+To stop and remove the running containers:
+
+```bash
+docker compose down
+```
+
+### Logs
+
+The server container writes logs to the project `logs/` directory through this volume:
+
+```yaml
+volumes:
+  - ./logs:/app/logs
+```
+
+Therefore, a log written inside the container as:
+
+```text
+/app/logs/server.log
+```
+
+is available on the host as:
+
+```text
+logs/server.log
+```
+
+When the server is launched natively from WSL/Linux from the project root, it also writes to the same `logs/` directory. Actual log files are ignored by Git, while `logs/.gitkeep` preserves the directory in the repository.
 
 ## Notes
 
