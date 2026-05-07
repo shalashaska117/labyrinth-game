@@ -55,8 +55,6 @@ Main primitives and tools used:
 - LCOV
 - Docker / Docker Compose
 
-The project intentionally avoids external libraries and terminal UI frameworks such as `ncurses`.
-
 ## Repository Structure
 
 ```text
