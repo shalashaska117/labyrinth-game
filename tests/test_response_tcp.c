@@ -1,19 +1,31 @@
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "../client/response.h"
 #include "../client/state.h"
+#include "../common/constants.h"
 #include "../common/protocol.h"
 
 #define TEST_PORT 5555
 
 /*
- * Starts a fake TCP server using the same socket primitives used
- * in the real project.
+ * Starts a fake TCP server for response parser testing.
+ *
+ * Input:
+ * - None.
+ *
+ * Output:
+ * - Sends one MAP message and one SESSION LOBBY message to a test client.
+ *
+ * Behavior:
+ * - Uses the same socket primitives as the project.
+ * - Avoids external testing frameworks.
+ * - Keeps the server alive long enough for the client to parse both messages.
  */
 static void start_fake_server(void) {
     int server_fd;
@@ -21,6 +33,7 @@ static void start_fake_server(void) {
     int opt;
     struct sockaddr_in addr;
     char response[MAX_MSG * 4];
+    char client_line[MAX_MSG];
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
@@ -60,23 +73,42 @@ static void start_fake_server(void) {
              "###\n"
              "#P#\n"
              "###\n"
-             "END\n");
+             "END\n"
+             "SESSION LOBBY\n");
 
     write(client_fd, response, strlen(response));
+
+    /*
+     * SESSION LOBBY makes the client send LIST automatically.
+     * Read it if it arrives, but do not fail the fake server if the client closes first.
+     */
+    recv_line(client_fd, client_line, sizeof(client_line));
 
     close(client_fd);
     close(server_fd);
 }
 
 /*
- * Connects to the fake TCP server and verifies that response.c
- * correctly parses the received MAP message.
+ * Connects to the fake server and parses its responses.
+ *
+ * Input:
+ * - None.
+ *
+ * Output:
+ * - Returns 1 if parsing succeeds and 0 otherwise.
+ *
+ * Behavior:
+ * - Reads the first MAP line with recv_line().
+ * - Delegates full parsing to response.c.
+ * - Verifies both map storage and SESSION LOBBY handling.
  */
 static int run_client_test(void) {
     int sock;
     struct sockaddr_in addr;
     char first_line[MAX_MSG];
     ClientState state;
+    int map_ok;
+    int lobby_ok;
 
     init_client_state(&state);
 
@@ -109,16 +141,44 @@ static int run_client_test(void) {
         return 0;
     }
 
+    map_ok = (state.local_map[4] == CELL_PLAYER);
+
+    if (recv_line(sock, first_line, sizeof(first_line)) < 0) {
+        close(sock);
+        return 0;
+    }
+
+    if (handle_server_message(sock, first_line, &state) < 0) {
+        close(sock);
+        return 0;
+    }
+
+    lobby_ok = (state.session_state == CLIENT_LOBBY &&
+                state.mode == COMMAND &&
+                state.show_global == 0 &&
+                state.rank_count == 0);
+
     close(sock);
-    return 1;
+    return map_ok && lobby_ok;
 }
 
 /*
  * Test entry point.
+ *
+ * Input:
+ * - None.
+ *
+ * Output:
+ * - Returns 0 if the parser test passes and 1 otherwise.
+ *
+ * Behavior:
+ * - Uses fork() to run a small fake server and test client.
+ * - Waits for the child process to avoid leaving a zombie process.
  */
 int main(void) {
     pid_t pid;
     int result;
+    int status;
 
     pid = fork();
 
@@ -133,6 +193,7 @@ int main(void) {
     }
 
     result = run_client_test();
+    waitpid(pid, &status, 0);
 
     if (result) {
         printf("PASSED: TCP response parser test\n");

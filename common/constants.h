@@ -19,6 +19,11 @@
 #define OBJECT_COUNT 15
 
 /*
+ * Full session duration in seconds.
+ */
+#define SESSION_DURATION 300
+
+/*
  * Interval in seconds between periodic global map broadcasts.
  */
 #define T_INTERVAL 5

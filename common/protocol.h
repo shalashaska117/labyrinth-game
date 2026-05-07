@@ -14,12 +14,18 @@
 #define CMD_LOCAL    "LOCAL"
 #define CMD_GLOBAL   "GLOBAL"
 #define CMD_QUIT     "QUIT"
+#define CMD_START    "START"
+#define CMD_READY    "READY"
+#define CMD_RANK     "RANK"
+#define CMD_RESET   "RESET"
 
 #define RESP_OK      "OK"
 #define RESP_ERR     "ERR"
 #define RESP_MAP     "MAP"
 #define RESP_USERS   "USERS"
 #define RESP_END     "END"
+#define RESP_RANK    "RANK"
+#define RESP_SESSION "SESSION"
 
 #define MAP_LOCAL    "LOCAL"
 #define MAP_GLOBAL   "GLOBAL"
@@ -32,27 +38,35 @@
 /*
  * Sends the entire buffer through the socket.
  *
- * sock: socket file descriptor.
- * buffer: data to send.
- * length: number of bytes to send.
+ * Input:
+ * - sock: socket file descriptor.
+ * - buffer: data to send.
+ * - length: number of bytes to send.
  *
- * The function handles partial sends.
+ * Output:
+ * - Returns 0 on success and -1 on error.
  *
- * Returns 0 on success, -1 on error.
+ * Behavior:
+ * - Repeats send() until all bytes are transmitted.
+ * - Stops immediately if the socket reports an error or closes.
  */
 int send_all(int sock, const char *buffer, size_t length);
 
 /*
- * Receives a single line from the socket.
+ * Receives a single protocol line from the socket.
  *
- * sock: socket file descriptor.
- * buffer: destination buffer.
- * size: maximum buffer size.
+ * Input:
+ * - sock: socket file descriptor.
+ * - buffer: destination buffer.
+ * - size: maximum buffer size.
  *
- * The function stops when it finds a newline character.
- * The resulting string is always null-terminated.
+ * Output:
+ * - Returns 0 on success and -1 on error or disconnection.
+ * - Writes a null-terminated line without the final newline into buffer.
  *
- * Returns 0 on success, -1 on error or disconnection.
+ * Behavior:
+ * - Reads one character at a time until a newline is found.
+ * - Preserves bounded writes and always terminates the string.
  */
 int recv_line(int sock, char *buffer, size_t size);
 

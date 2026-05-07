@@ -4,56 +4,64 @@
 #include <sys/socket.h>
 
 /*
- * Sends all bytes contained in buffer.
+ * Sends all bytes contained in a buffer.
  *
- * sock: socket descriptor.
- * buffer: data to send.
- * length: total number of bytes to send.
+ * Input:
+ * - sock: socket file descriptor.
+ * - buffer: source buffer to transmit.
+ * - length: number of bytes to transmit.
  *
- * send() may transmit fewer bytes than requested. For this reason,
- * this function keeps calling send() until the whole buffer has been
- * transmitted or an error occurs.
+ * Output:
+ * - Returns 0 if all bytes are sent.
+ * - Returns -1 if send() fails or the connection closes.
  *
- * Returns 0 if all bytes are sent, -1 otherwise.
+ * Behavior:
+ * - Handles partial send() operations by advancing through the buffer.
+ * - Does not add terminators or protocol newlines by itself.
  */
 int send_all(int sock, const char *buffer, size_t length) {
     size_t total = 0;
-    ssize_t sent;
 
     while (total < length) {
-        sent = send(sock, buffer + total, length - total, 0);
+        ssize_t sent = send(sock, buffer + total, length - total, 0);
 
         if (sent <= 0) {
             return -1;
         }
 
-        total += sent;
+        total += (size_t)sent;
     }
 
     return 0;
 }
 
 /*
- * Receives a line from the socket.
+ * Receives one newline-terminated protocol line.
  *
- * sock: socket descriptor.
- * buffer: destination buffer.
- * size: maximum size of the destination buffer.
+ * Input:
+ * - sock: socket file descriptor.
+ * - buffer: destination buffer.
+ * - size: destination buffer size.
  *
- * The function reads one character at a time and stops when it receives
- * a newline, when the buffer is full, or when an error occurs.
+ * Output:
+ * - Returns 0 when a line is read.
+ * - Returns -1 on recv() error, closed connection or invalid buffer size.
+ * - Stores the received line without the newline character.
  *
- * The resulting string is always null-terminated.
- *
- * Returns 0 on success, -1 on error or closed connection.
+ * Behavior:
+ * - Reads one byte at a time to keep the line-based protocol simple.
+ * - Truncates safely if the line exceeds the buffer capacity.
  */
 int recv_line(int sock, char *buffer, size_t size) {
     size_t i = 0;
     char c;
-    ssize_t received;
+
+    if (buffer == NULL || size == 0) {
+        return -1;
+    }
 
     while (i < size - 1) {
-        received = recv(sock, &c, 1, 0);
+        ssize_t received = recv(sock, &c, 1, 0);
 
         if (received <= 0) {
             return -1;
@@ -63,8 +71,7 @@ int recv_line(int sock, char *buffer, size_t size) {
             break;
         }
 
-        buffer[i] = c;
-        i++;
+        buffer[i++] = c;
     }
 
     buffer[i] = '\0';
