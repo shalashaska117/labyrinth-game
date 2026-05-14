@@ -334,6 +334,18 @@ void game_mark_visible(int visible[MAP_HEIGHT][MAP_WIDTH], int px, int py) {
 }
 
 /*
+ * Checks whether a coordinate belongs to one of the other players.
+ */
+static int is_other_player(int x, int y, position_t *others, int count) {
+    for (int i = 0; i < count; i++) {
+        if (others[i].x == x && others[i].y == y) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
  * Converts one maze cell into a printable character.
  *
  * Input:
@@ -395,7 +407,9 @@ void game_build_local_view(cell_t maze[MAP_HEIGHT][MAP_WIDTH],
                            size_t out_size,
                            int px,
                            int py,
-                           int visible[MAP_HEIGHT][MAP_WIDTH]) {
+                           int visible[MAP_HEIGHT][MAP_WIDTH],
+                           position_t *other_players,
+                           int other_count) {
     int rows = VIEW_RADIUS * 2 + 1;
     int cols = VIEW_RADIUS * 2 + 1;
     char body[(VIEW_RADIUS * 2 + 1) * (VIEW_RADIUS * 2 + 2) + 1];
@@ -411,8 +425,12 @@ void game_build_local_view(cell_t maze[MAP_HEIGHT][MAP_WIDTH],
             int wy = py + dy;
             int is_player = (dx == 0 && dy == 0);
 
-            if (inside(wx, wy)) {
-                body[pos++] = cell_char(&maze[wy][wx], visible[wy][wx], is_player);
+            if (is_player) {
+                body[pos++] = CELL_PLAYER;
+            } else if (inside(wx, wy) && is_other_player(wx, wy, other_players, other_count) && visible[wy][wx]) {
+                body[pos++] = CELL_PLAYER_OTHER;
+            } else if (inside(wx, wy)) {
+                body[pos++] = cell_char(&maze[wy][wx], visible[wy][wx], 0);
             } else {
                 body[pos++] = CELL_WALL;
             }
@@ -449,7 +467,9 @@ void game_build_global_view(cell_t maze[MAP_HEIGHT][MAP_WIDTH],
                             size_t out_size,
                             int px,
                             int py,
-                            int visible[MAP_HEIGHT][MAP_WIDTH]) {
+                            int visible[MAP_HEIGHT][MAP_WIDTH],
+                            position_t *other_players,
+                            int other_count) {
     char body[MAP_HEIGHT * (MAP_WIDTH + 1) + 1];
     int pos = 0;
 
@@ -460,7 +480,14 @@ void game_build_global_view(cell_t maze[MAP_HEIGHT][MAP_WIDTH],
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             int is_player = (x == px && y == py);
-            body[pos++] = cell_char(&maze[y][x], visible[y][x], is_player);
+
+            if (is_player) {
+                body[pos++] = CELL_PLAYER;
+            } else if (is_other_player(x, y, other_players, other_count) && visible[y][x]) {
+                body[pos++] = CELL_PLAYER_OTHER;
+            } else {
+                body[pos++] = cell_char(&maze[y][x], visible[y][x], 0);
+            }
         }
 
         body[pos++] = '\n';

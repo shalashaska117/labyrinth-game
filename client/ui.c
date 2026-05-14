@@ -17,6 +17,8 @@
 #define UI_CONTENT_WIDTH 88
 #define UI_BORDER_WIDTH 90
 #define MAP_DRAW_LIMIT UI_CONTENT_WIDTH
+#define UI_REQUIRED_ROWS 40
+#define UI_REQUIRED_COLS 100
 
 static struct termios orig_termios;
 static int terminal_raw_enabled = 0;
@@ -68,6 +70,15 @@ void print_help(void) {
 void clear_screen(void) {
     printf("\033[2J");
     printf("\033[H");
+}
+
+/*
+ * Requests a terminal resize and prints a size hint.
+ */
+void terminal_resize_hint(void) {
+    printf("\033[8;%d;%dt", UI_REQUIRED_ROWS, UI_REQUIRED_COLS);
+    printf("\nTerminal should be at least %dx%d for the best experience.\n",
+           UI_REQUIRED_COLS, UI_REQUIRED_ROWS);
 }
 
 /*
@@ -210,25 +221,42 @@ void print_users(char users[][MAX_NICK], int count) {
 }
 
 /*
+ * Returns the visible length of a string (excluding ANSI escape sequences).
+ */
+static int visible_width(const char *s) {
+    int w = 0;
+    while (*s) {
+        if (*s == '\033') {
+            while (*s && *s != 'm') s++;
+            if (*s) s++;
+        } else {
+            w++;
+            s++;
+        }
+    }
+    return w;
+}
+
+/*
  * Draws one bordered text line with padding.
  *
  * Input:
  * - text: content to display.
  *
- * Output:
- * - Writes a fixed-width row to standard output.
- *
  * Behavior:
- * - Truncates lines longer than UI_CONTENT_WIDTH.
+ * - Truncates lines longer than UI_CONTENT_WIDTH visible characters.
  * - Pads shorter lines with spaces.
- * - Keeps all persistent UI rows aligned.
+ * - Strips ANSI codes from the width calculation so the border stays aligned.
  */
 static void draw_row(const char *text) {
-    printf("%s %-*.*s %s\n",
+    if (text == NULL) text = "";
+    int vw = visible_width(text);
+    int pad = UI_CONTENT_WIDTH - vw;
+    if (pad < 0) pad = 0;
+    printf("%s %s%*s %s\n",
            BORDER_VERTICAL,
-           UI_CONTENT_WIDTH,
-           UI_CONTENT_WIDTH,
-           text != NULL ? text : "",
+           text,
+           pad, "",
            BORDER_VERTICAL);
 }
 
@@ -302,8 +330,27 @@ static void draw_players(const ClientState *state) {
 
     for (int i = 0; i < state->player_count; i++) {
         char row[UI_CONTENT_WIDTH + 1];
+        char colored[UI_CONTENT_WIDTH * 2];
+        const char *src = state->player_list[i];
+        int pos = 0;
 
-        snprintf(row, sizeof(row), "  %.80s", state->player_list[i]);
+        pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos, "  ");
+
+        while (*src && pos < (int)sizeof(colored) - 16) {
+            if (strncmp(src, "[owner]", 7) == 0) {
+                pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos, "%s[owner]%s", COLOR_GREEN, COLOR_RESET);
+                src += 7;
+            } else if (strncmp(src, "[ready]", 7) == 0) {
+                pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos, "%s[ready]%s", COLOR_YELLOW, COLOR_RESET);
+                src += 7;
+            } else {
+                colored[pos++] = *src;
+                src++;
+            }
+        }
+
+        colored[pos] = '\0';
+        snprintf(row, sizeof(row), "%.80s", colored);
         draw_row(row);
     }
 }
@@ -339,17 +386,55 @@ static void draw_selected_map(const ClientState *state) {
         cols = state->local_cols;
     }
 
+    char border_line[UI_CONTENT_WIDTH + 1];
+    int bw = cols < UI_CONTENT_WIDTH ? cols : UI_CONTENT_WIDTH;
+    int bp = 0;
+    border_line[bp++] = '+';
+    for (int i = 0; i < bw; i++) border_line[bp++] = '-';
+    border_line[bp++] = '+';
+    border_line[bp] = '\0';
+    draw_row(border_line);
+
     for (int r = 0; r < rows && r < 24; r++) {
-        char row[UI_CONTENT_WIDTH + 1];
+        char row[MAP_DRAW_LIMIT * 10 + 4];
         int pos = 0;
 
+        row[pos++] = '|';
+
         for (int c = 0; c < cols && c < MAP_DRAW_LIMIT; c++) {
-            row[pos++] = map[r * cols + c];
+            char cell = map[r * cols + c];
+            switch (cell) {
+                case CELL_WALL:
+                    pos += snprintf(row + pos, sizeof(row) - (size_t)pos, "%s#%s", COLOR_WHITE, COLOR_RESET);
+                    break;
+                case CELL_PLAYER:
+                    pos += snprintf(row + pos, sizeof(row) - (size_t)pos, "%sP%s", COLOR_GREEN, COLOR_RESET);
+                    break;
+                case CELL_PLAYER_OTHER:
+                    pos += snprintf(row + pos, sizeof(row) - (size_t)pos, "%sO%s", COLOR_YELLOW, COLOR_RESET);
+                    break;
+                case CELL_OBJECT:
+                    pos += snprintf(row + pos, sizeof(row) - (size_t)pos, "%s*%s", COLOR_CYAN, COLOR_RESET);
+                    break;
+                case CELL_EXIT:
+                    pos += snprintf(row + pos, sizeof(row) - (size_t)pos, "%sE%s", COLOR_MAGENTA, COLOR_RESET);
+                    break;
+                case CELL_HIDDEN:
+                case CELL_PLAYER_HIDDEN:
+                    pos += snprintf(row + pos, sizeof(row) - (size_t)pos, "%s%c%s", COLOR_BLUE, cell, COLOR_RESET);
+                    break;
+                default:
+                    row[pos++] = cell;
+                    break;
+            }
         }
 
+        row[pos++] = '|';
         row[pos] = '\0';
         draw_row(row);
     }
+
+    draw_row(border_line);
 }
 
 /*
@@ -441,12 +526,22 @@ void draw_screen(const ClientState *state) {
     draw_border(BORDER_TOP_LEFT, BORDER_TOP_RIGHT);
 
     if (state->session_state == CLIENT_LOBBY) {
-        draw_row("Lobby - Waiting for players");
-        draw_row(state->is_owner ? "You are the owner. Type start to begin." :
-                                   "Type ready to mark ready. Owner can start.");
+        draw_row(COLOR_BOLD "Lobby - Waiting for players" COLOR_RESET);
+        if (state->is_owner) {
+            draw_row(COLOR_GREEN "You are the owner." COLOR_RESET " Type " COLOR_CYAN "start" COLOR_RESET " to begin.");
+        } else {
+            draw_row("Type " COLOR_YELLOW "ready" COLOR_RESET " to mark ready. " COLOR_GREEN "Owner" COLOR_RESET " can start.");
+        }
         draw_players(state);
     } else if (state->session_state == CLIENT_PLAYING) {
         draw_selected_map(state);
+        draw_row("");
+        draw_row("Legend: " COLOR_GREEN "P" COLOR_RESET "=You  "
+                          COLOR_YELLOW "O" COLOR_RESET "=Other  "
+                          COLOR_CYAN "*" COLOR_RESET "=Object  "
+                          COLOR_MAGENTA "E" COLOR_RESET "=Exit  "
+                          COLOR_BLUE "?" COLOR_RESET "=Hidden  "
+                          "#=Wall");
     } else {
         draw_results(state);
     }

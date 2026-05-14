@@ -450,6 +450,8 @@ int main(int argc, char *argv[]) {
         state_set_status(&state, "Raw terminal mode unavailable. Command mode only.");
     }
 
+    terminal_resize_hint();
+    sleep(1);
     atexit(terminal_restore);
     draw_screen(&state);
 

@@ -10,6 +10,7 @@ void print_map(const char *title, const char *map, int rows, int cols);
 void print_users(char users[][MAX_NICK], int count);
 int terminal_set_raw(void);
 void terminal_restore(void);
+void terminal_resize_hint(void);
 void draw_screen(const ClientState *state);
 
 #endif

@@ -323,18 +323,18 @@ static int test_map_builders(void) {
     visible[2][1] = 1;
     visible[0][0] = 1;
 
-    game_build_local_view(maze, out, sizeof(out), 1, 1, visible);
+    game_build_local_view(maze, out, sizeof(out), 1, 1, visible, NULL, 0);
     if (strstr(out, "MAP LOCAL") == NULL || strstr(out, "END") == NULL || strchr(out, CELL_PLAYER) == NULL) return fail("local map response is incomplete");
     if (strchr(out, CELL_OBJECT) == NULL || strchr(out, CELL_EXIT) == NULL) return fail("local map did not include visible object and exit");
 
-    game_build_global_view(maze, out, sizeof(out), 1, 1, visible);
+    game_build_global_view(maze, out, sizeof(out), 1, 1, visible, NULL, 0);
     if (strstr(out, "MAP GLOBAL") == NULL || strstr(out, "END") == NULL || strchr(out, CELL_PLAYER) == NULL) return fail("global map response is incomplete");
     if (strchr(out, CELL_HIDDEN) == NULL) return fail("global map did not include hidden cells");
 
-    game_build_local_view(maze, NULL, sizeof(out), 1, 1, visible);
-    game_build_local_view(maze, out, 0, 1, 1, visible);
-    game_build_global_view(maze, NULL, sizeof(out), 1, 1, visible);
-    game_build_global_view(maze, out, 0, 1, 1, visible);
+    game_build_local_view(maze, NULL, sizeof(out), 1, 1, visible, NULL, 0);
+    game_build_local_view(maze, out, 0, 1, 1, visible, NULL, 0);
+    game_build_global_view(maze, NULL, sizeof(out), 1, 1, visible, NULL, 0);
+    game_build_global_view(maze, out, 0, 1, 1, visible, NULL, 0);
 
     printf("PASSED: map builders\n");
     return 1;

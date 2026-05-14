@@ -33,12 +33,16 @@ void game_build_local_view(cell_t maze[MAP_HEIGHT][MAP_WIDTH],
                            size_t out_size,
                            int px,
                            int py,
-                           int visible[MAP_HEIGHT][MAP_WIDTH]);
+                           int visible[MAP_HEIGHT][MAP_WIDTH],
+                           position_t *other_players,
+                           int other_count);
 void game_build_global_view(cell_t maze[MAP_HEIGHT][MAP_WIDTH],
                             char *out,
                             size_t out_size,
                             int px,
                             int py,
-                            int visible[MAP_HEIGHT][MAP_WIDTH]);
+                            int visible[MAP_HEIGHT][MAP_WIDTH],
+                            position_t *other_players,
+                            int other_count);
 
 #endif

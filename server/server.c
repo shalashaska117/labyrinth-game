@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -642,6 +643,54 @@ static void *session_timer(void *arg) {
 }
 
 /*
+ * Finds random walkable spawn positions for all clients.
+ *
+ * Collects all odd-coordinate walkable cells that are not the exit,
+ * then assigns them round-robin to clients.
+ */
+static void assign_spawn_positions(void) {
+    position_t pool[MAP_WIDTH * MAP_HEIGHT];
+    int pool_count = 0;
+
+    for (int y = 1; y < MAP_HEIGHT - 1; y += 2) {
+        for (int x = 1; x < MAP_WIDTH - 1; x += 2) {
+            if (game_is_walkable(maze, x, y) && !game_is_exit(maze, x, y)) {
+                pool[pool_count].x = x;
+                pool[pool_count].y = y;
+                pool_count++;
+            }
+        }
+    }
+
+    int idx = 0;
+    for (client_t *tmp = client_list; tmp != NULL; tmp = tmp->next) {
+        reset_client_for_lobby(tmp);
+        if (pool_count > 0) {
+            int pi = idx % pool_count;
+            tmp->pos.x = pool[pi].x;
+            tmp->pos.y = pool[pi].y;
+        }
+        game_mark_visible(tmp->visible, tmp->pos.x, tmp->pos.y);
+        idx++;
+    }
+}
+
+/*
+ * Collects positions of all players except the given one.
+ */
+static int get_other_positions(client_t *self, position_t *out, int max) {
+    int count = 0;
+    for (client_t *tmp = client_list; tmp != NULL && count < max; tmp = tmp->next) {
+        if (tmp != self) {
+            out[count].x = tmp->pos.x;
+            out[count].y = tmp->pos.y;
+            count++;
+        }
+    }
+    return count;
+}
+
+/*
  * Starts the gameplay session if the requester is the owner.
  *
  * Input:
@@ -684,9 +733,7 @@ static int handle_start(client_t *c) {
     pthread_mutex_unlock(&maze_mutex);
 
     pthread_mutex_lock(&client_mutex);
-    for (client_t *tmp = client_list; tmp != NULL; tmp = tmp->next) {
-        reset_client_for_lobby(tmp);
-    }
+    assign_spawn_positions();
     pthread_mutex_unlock(&client_mutex);
 
     session_state = PLAYING;
@@ -729,6 +776,8 @@ static int handle_move(client_t *c, const char *line) {
     int moved;
     int obj;
     int reached_exit;
+    position_t other_positions[MAX_USERS_DISPLAY];
+    int other_count;
 
     while (*dir_str == ' ') {
         dir_str++;
@@ -744,6 +793,10 @@ static int handle_move(client_t *c, const char *line) {
         return 0;
     }
 
+    pthread_mutex_lock(&client_mutex);
+    other_count = get_other_positions(c, other_positions, MAX_USERS_DISPLAY);
+    pthread_mutex_unlock(&client_mutex);
+
     pthread_mutex_lock(&maze_mutex);
     moved = game_move(maze, &c->pos, d);
 
@@ -751,7 +804,7 @@ static int handle_move(client_t *c, const char *line) {
         game_mark_visible(c->visible, c->pos.x, c->pos.y);
         obj = game_pickup(maze, c->pos.x, c->pos.y);
         reached_exit = game_is_exit(maze, c->pos.x, c->pos.y);
-        game_build_local_view(maze, buf, sizeof(buf), c->pos.x, c->pos.y, c->visible);
+        game_build_local_view(maze, buf, sizeof(buf), c->pos.x, c->pos.y, c->visible, other_positions, other_count);
     } else {
         obj = 0;
         reached_exit = 0;
@@ -805,13 +858,19 @@ static int handle_move(client_t *c, const char *line) {
  */
 static int handle_local(client_t *c) {
     char buf[BUFFER_SIZE];
+    position_t other_positions[MAX_USERS_DISPLAY];
+    int other_count;
 
     if (block_if_not_playing(c)) {
         return 0;
     }
 
+    pthread_mutex_lock(&client_mutex);
+    other_count = get_other_positions(c, other_positions, MAX_USERS_DISPLAY);
+    pthread_mutex_unlock(&client_mutex);
+
     pthread_mutex_lock(&maze_mutex);
-    game_build_local_view(maze, buf, sizeof(buf), c->pos.x, c->pos.y, c->visible);
+    game_build_local_view(maze, buf, sizeof(buf), c->pos.x, c->pos.y, c->visible, other_positions, other_count);
     pthread_mutex_unlock(&maze_mutex);
 
     send_all(c->fd, buf, strlen(buf));
@@ -833,13 +892,19 @@ static int handle_local(client_t *c) {
  */
 static int handle_global(client_t *c) {
     char buf[BUFFER_SIZE];
+    position_t other_positions[MAX_USERS_DISPLAY];
+    int other_count;
 
     if (block_if_not_playing(c)) {
         return 0;
     }
 
+    pthread_mutex_lock(&client_mutex);
+    other_count = get_other_positions(c, other_positions, MAX_USERS_DISPLAY);
+    pthread_mutex_unlock(&client_mutex);
+
     pthread_mutex_lock(&maze_mutex);
-    game_build_global_view(maze, buf, sizeof(buf), c->pos.x, c->pos.y, c->visible);
+    game_build_global_view(maze, buf, sizeof(buf), c->pos.x, c->pos.y, c->visible, other_positions, other_count);
     pthread_mutex_unlock(&maze_mutex);
 
     send_all(c->fd, buf, strlen(buf));
@@ -1023,9 +1088,11 @@ static void *periodic_global(void *arg) {
         pthread_mutex_lock(&client_mutex);
         for (client_t *c = client_list; c != NULL; c = c->next) {
             char buf[BUFFER_SIZE];
+            position_t other_positions[MAX_USERS_DISPLAY];
+            int other_count = get_other_positions(c, other_positions, MAX_USERS_DISPLAY);
 
             pthread_mutex_lock(&maze_mutex);
-            game_build_global_view(maze, buf, sizeof(buf), c->pos.x, c->pos.y, c->visible);
+            game_build_global_view(maze, buf, sizeof(buf), c->pos.x, c->pos.y, c->visible, other_positions, other_count);
             pthread_mutex_unlock(&maze_mutex);
 
             send_all(c->fd, buf, strlen(buf));
@@ -1150,6 +1217,9 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
 
+    struct timeval tv = { 1, 0 };
+    setsockopt(server_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         perror("socket");
@@ -1192,6 +1262,9 @@ int main(int argc, char *argv[]) {
         pthread_t th;
 
         if (client_fd < 0) {
+            if (errno == EAGAIN || errno == EINTR) {
+                continue;
+            }
             if (running) {
                 perror("accept");
             }

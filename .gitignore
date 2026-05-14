@@ -4,8 +4,12 @@
 client_app
 server_app
 test_command_parser
+test_command_extended
 test_state
+test_state_extended
 test_response_tcp
+test_protocol_extended
+test_game
 
 # Generic executables (Linux/Windows)
 *.out
@@ -87,6 +91,7 @@ cmake-build-*/
 
 # macOS
 .DS_Store
+*.dSYM
 
 # Windows
 Thumbs.db
