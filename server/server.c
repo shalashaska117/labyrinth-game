@@ -57,6 +57,7 @@ static int server_fd = -1;
 static volatile sig_atomic_t running = 1;
 static session_state_t session_state = LOBBY;
 static int timer_started = 0;
+static time_t session_start_time = 0;
 
 /*
  * Handles process termination signals.
@@ -224,6 +225,28 @@ static void copy_client_score(score_entry_t *dst, const client_t *src) {
     dst->objects_collected = src->objects_collected;
     dst->exit_reached = src->exit_reached;
     dst->exit_time = src->exit_time;
+}
+
+/*
+ * Checks whether every connected player has reached the exit.
+ *
+ * Input:
+ * - none (uses client_list under client_mutex).
+ *
+ * Output:
+ * - Returns 1 if all players have reached the exit, 0 otherwise.
+ *
+ * Behavior:
+ * - Assumes client_mutex is already held by the caller.
+ */
+static int all_players_done(void) {
+    for (client_t *c = client_list; c != NULL; c = c->next) {
+        if (!c->exit_reached) {
+            return 0;
+        }
+    }
+
+    return client_list != NULL;
 }
 
 /*
@@ -626,20 +649,28 @@ static int handle_reset(client_t *c) {
 static void *session_timer(void *arg) {
     (void)arg;
 
-    sleep(SESSION_DURATION);
+    while (1) {
+        sleep(1);
 
-    pthread_mutex_lock(&session_mutex);
-    if (session_state == PLAYING) {
-        session_state = FINISHED;
-        timer_started = 0;
+        pthread_mutex_lock(&session_mutex);
+        if (session_state != PLAYING) {
+            timer_started = 0;
+            pthread_mutex_unlock(&session_mutex);
+            return NULL;
+        }
+
+        time_t now = time(NULL);
+        int elapsed = (int)(now - session_start_time);
+        if (elapsed >= SESSION_DURATION) {
+            session_state = FINISHED;
+            timer_started = 0;
+            pthread_mutex_unlock(&session_mutex);
+            client_list_broadcast("SESSION ENDED\n");
+            log_msg("SESSION ENDED by timer");
+            return NULL;
+        }
         pthread_mutex_unlock(&session_mutex);
-        client_list_broadcast("SESSION ENDED\n");
-        log_msg("SESSION ENDED by timer");
-        return NULL;
     }
-    pthread_mutex_unlock(&session_mutex);
-
-    return NULL;
 }
 
 /*
@@ -681,7 +712,7 @@ static void assign_spawn_positions(void) {
 static int get_other_positions(client_t *self, position_t *out, int max) {
     int count = 0;
     for (client_t *tmp = client_list; tmp != NULL && count < max; tmp = tmp->next) {
-        if (tmp != self) {
+        if (tmp != self && !tmp->exit_reached) {
             out[count].x = tmp->pos.x;
             out[count].y = tmp->pos.y;
             count++;
@@ -737,6 +768,7 @@ static int handle_start(client_t *c) {
     pthread_mutex_unlock(&client_mutex);
 
     session_state = PLAYING;
+    session_start_time = time(NULL);
 
     if (!timer_started) {
         timer_started = 1;
@@ -829,15 +861,21 @@ static int handle_move(client_t *c, const char *line) {
         c->exit_time = time(NULL);
         send_all(c->fd, "OK exit found\n", strlen("OK exit found\n"));
 
-        pthread_mutex_lock(&session_mutex);
-        if (session_state == PLAYING) {
-            session_state = FINISHED;
-            timer_started = 0;
-            pthread_mutex_unlock(&session_mutex);
-            client_list_broadcast("SESSION ENDED\n");
-        } else {
+        pthread_mutex_lock(&client_mutex);
+        if (all_players_done()) {
+            pthread_mutex_lock(&session_mutex);
+            if (session_state == PLAYING) {
+                session_state = FINISHED;
+                timer_started = 0;
+                pthread_mutex_unlock(&session_mutex);
+                pthread_mutex_unlock(&client_mutex);
+                client_list_broadcast("SESSION ENDED\n");
+                log_msg("SESSION ENDED: all players found exit");
+                return 0;
+            }
             pthread_mutex_unlock(&session_mutex);
         }
+        pthread_mutex_unlock(&client_mutex);
     }
 
     return 0;
@@ -1043,13 +1081,30 @@ static int handle_rank(client_t *c) {
     pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "RANK %d\n", count);
 
     for (int i = 0; i < count && pos < (int)sizeof(buf); i++) {
+        int elapsed = 0;
+        if (entries[i].exit_reached && session_start_time > 0) {
+            elapsed = (int)(entries[i].exit_time - session_start_time);
+        }
+
         pos += snprintf(buf + pos,
                         sizeof(buf) - (size_t)pos,
-                        "%d %s %d objects%s\n",
+                        "%d. %s - %d objects",
                         i + 1,
                         entries[i].nickname,
-                        entries[i].objects_collected,
-                        entries[i].exit_reached ? " exit" : "");
+                        entries[i].objects_collected);
+
+        if (entries[i].exit_reached) {
+            pos += snprintf(buf + pos,
+                            sizeof(buf) - (size_t)pos,
+                            " - exit in %ds",
+                            elapsed >= 0 ? elapsed : 0);
+        } else {
+            pos += snprintf(buf + pos,
+                            sizeof(buf) - (size_t)pos,
+                            " - did not exit");
+        }
+
+        pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "\n");
     }
 
     snprintf(buf + pos, sizeof(buf) - (size_t)pos, "END\n");
@@ -1075,15 +1130,27 @@ static void *periodic_global(void *arg) {
 
     while (running) {
         session_state_t state;
+        int remaining;
         sleep(T_INTERVAL);
 
         pthread_mutex_lock(&session_mutex);
         state = session_state;
+        if (state == PLAYING) {
+            time_t now = time(NULL);
+            int elapsed = (int)(now - session_start_time);
+            remaining = SESSION_DURATION - elapsed;
+            if (remaining < 0) remaining = 0;
+        } else {
+            remaining = 0;
+        }
         pthread_mutex_unlock(&session_mutex);
 
         if (state != PLAYING) {
             continue;
         }
+
+        char time_buf[64];
+        snprintf(time_buf, sizeof(time_buf), "TIME %d\n", remaining);
 
         pthread_mutex_lock(&client_mutex);
         for (client_t *c = client_list; c != NULL; c = c->next) {
@@ -1096,6 +1163,7 @@ static void *periodic_global(void *arg) {
             pthread_mutex_unlock(&maze_mutex);
 
             send_all(c->fd, buf, strlen(buf));
+            send_all(c->fd, time_buf, strlen(time_buf));
         }
         pthread_mutex_unlock(&client_mutex);
     }
@@ -1176,6 +1244,34 @@ static void *handle_client(void *arg) {
     snprintf(log_buf, sizeof(log_buf), "DISCONNECTED: %s", c->nickname);
     log_msg(log_buf);
     client_list_remove(c->fd);
+
+    pthread_mutex_lock(&session_mutex);
+    if (session_state == PLAYING && client_list == NULL) {
+        session_state = FINISHED;
+        timer_started = 0;
+        pthread_mutex_unlock(&session_mutex);
+        log_msg("SESSION ENDED: all players left");
+        return NULL;
+    }
+
+    if (session_state == PLAYING) {
+        pthread_mutex_lock(&client_mutex);
+        int done = all_players_done();
+        pthread_mutex_unlock(&client_mutex);
+
+        if (done) {
+            session_state = FINISHED;
+            timer_started = 0;
+            pthread_mutex_unlock(&session_mutex);
+            client_list_broadcast("SESSION ENDED\n");
+            log_msg("SESSION ENDED: all players found exit");
+            return NULL;
+        }
+    }
+
+    pthread_mutex_unlock(&session_mutex);
+    broadcast_user_list();
+
     return NULL;
 }
 

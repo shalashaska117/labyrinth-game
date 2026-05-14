@@ -29,6 +29,8 @@ void init_client_state(ClientState *state) {
     state->mode = COMMAND;
     state->session_state = CLIENT_LOBBY;
     state->show_global = 0;
+    state->exit_reached = 0;
+    state->time_remaining = 0;
 
     for (i = 0; i < MAP_WIDTH * MAP_HEIGHT; i++) {
         state->global_map[i] = CELL_HIDDEN;

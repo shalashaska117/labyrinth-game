@@ -294,6 +294,11 @@ int handle_server_message(int sock, const char *first_line, ClientState *state) 
     if (strncmp(first_line, RESP_OK, strlen(RESP_OK)) == 0) {
         state_set_status(state, first_line);
 
+        if (state != NULL && strstr(first_line, "exit found") != NULL) {
+            state->exit_reached = 1;
+            state->show_global = 1;
+        }
+
         if (state != NULL && strstr(first_line, "owner") != NULL) {
             state->is_owner = 1;
         }
@@ -311,6 +316,16 @@ int handle_server_message(int sock, const char *first_line, ClientState *state) 
 
         if (state != NULL && state->pending_auth) {
             clear_pending_auth(state);
+        }
+
+        draw_screen(state);
+        return 0;
+    }
+
+    if (strncmp(first_line, "TIME", 4) == 0) {
+        int sec = 0;
+        if (sscanf(first_line, "TIME %d", &sec) == 1 && state != NULL) {
+            state->time_remaining = sec;
         }
 
         draw_screen(state);

@@ -38,6 +38,8 @@ typedef struct {
     char status_message[MAX_MSG];
     int rank_count;
     char rank_lines[MAX_USERS_DISPLAY][MAX_MSG];
+    int time_remaining;
+    int exit_reached;
 } ClientState;
 
 void init_client_state(ClientState *state);

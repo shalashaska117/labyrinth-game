@@ -534,6 +534,10 @@ void draw_screen(const ClientState *state) {
         }
         draw_players(state);
     } else if (state->session_state == CLIENT_PLAYING) {
+        if (state->exit_reached) {
+            draw_row(COLOR_YELLOW "You found the exit! Spectating..." COLOR_RESET);
+        }
+
         draw_selected_map(state);
         draw_row("");
         draw_row("Legend: " COLOR_GREEN "P" COLOR_RESET "=You  "
@@ -542,6 +546,14 @@ void draw_screen(const ClientState *state) {
                           COLOR_MAGENTA "E" COLOR_RESET "=Exit  "
                           COLOR_BLUE "?" COLOR_RESET "=Hidden  "
                           "#=Wall");
+
+        if (state->time_remaining >= 0) {
+            int mins = state->time_remaining / 60;
+            int secs = state->time_remaining % 60;
+            char timer_str[32];
+            snprintf(timer_str, sizeof(timer_str), "Time remaining: %02d:%02d", mins, secs);
+            draw_row(timer_str);
+        }
     } else {
         draw_results(state);
     }
