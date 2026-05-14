@@ -68,8 +68,7 @@ void print_help(void) {
  * - Moves the cursor to the top-left corner.
  */
 void clear_screen(void) {
-    printf("\033[2J");
-    printf("\033[H");
+    printf("\033[2J\033[H");
 }
 
 /*
@@ -230,8 +229,13 @@ static int visible_width(const char *s) {
             while (*s && *s != 'm') s++;
             if (*s) s++;
         } else {
+            unsigned char c = (unsigned char)*s;
+            int bytes = 1;
+            if ((c & 0xE0) == 0xC0)      bytes = 2;
+            else if ((c & 0xF0) == 0xE0) bytes = 3;
+            else if ((c & 0xF8) == 0xF0) bytes = 4;
             w++;
-            s++;
+            s += bytes;
         }
     }
     return w;
@@ -389,9 +393,9 @@ static void draw_selected_map(const ClientState *state) {
     char border_line[UI_CONTENT_WIDTH + 1];
     int bw = cols < UI_CONTENT_WIDTH ? cols : UI_CONTENT_WIDTH;
     int bp = 0;
-    border_line[bp++] = '+';
-    for (int i = 0; i < bw; i++) border_line[bp++] = '-';
-    border_line[bp++] = '+';
+    border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x8c;
+    for (int i = 0; i < bw; i++) { border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x80; }
+    border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x90;
     border_line[bp] = '\0';
     draw_row(border_line);
 
@@ -399,7 +403,7 @@ static void draw_selected_map(const ClientState *state) {
         char row[MAP_DRAW_LIMIT * 10 + 4];
         int pos = 0;
 
-        row[pos++] = '|';
+        row[pos++] = 0xe2; row[pos++] = 0x94; row[pos++] = 0x82;
 
         for (int c = 0; c < cols && c < MAP_DRAW_LIMIT; c++) {
             char cell = map[r * cols + c];
@@ -429,11 +433,16 @@ static void draw_selected_map(const ClientState *state) {
             }
         }
 
-        row[pos++] = '|';
+        row[pos++] = 0xe2; row[pos++] = 0x94; row[pos++] = 0x82;
         row[pos] = '\0';
         draw_row(row);
     }
 
+    bp = 0;
+    border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x94;
+    for (int i = 0; i < bw; i++) { border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x80; }
+    border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x98;
+    border_line[bp] = '\0';
     draw_row(border_line);
 }
 

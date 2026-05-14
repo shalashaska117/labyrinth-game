@@ -328,7 +328,6 @@ int handle_server_message(int sock, const char *first_line, ClientState *state) 
             state->time_remaining = sec;
         }
 
-        draw_screen(state);
         return 0;
     }
 
