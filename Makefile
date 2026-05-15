@@ -1,4 +1,4 @@
-.PHONY: help all debug release client server test test-command test-command-extended test-state test-state-extended test-response-tcp test-protocol-extended test-game coverage coverage-run lcov lcov-report lcov-open open-coverage valgrind-test valgrind-test-command valgrind-test-command-extended valgrind-test-state valgrind-test-state-extended valgrind-test-response valgrind-test-protocol-extended valgrind-test-game valgrind-client valgrind-server run-client run-server clean clean-logs
+.PHONY: help all build debug release client server test test-command test-command-extended test-state test-state-extended test-response-tcp test-protocol-extended test-game coverage coverage-run lcov lcov-report lcov-open open-coverage valgrind-test valgrind-test-command valgrind-test-command-extended valgrind-test-state valgrind-test-state-extended valgrind-test-response valgrind-test-protocol-extended valgrind-test-game valgrind-client valgrind-server run-client run-server clean clean-logs
 
 CC=gcc
 
@@ -43,6 +43,7 @@ help:
 	@echo ""
 	@echo "  make help                         Show this help message."
 	@echo "  make all                          Build the project in debug mode."
+	@echo "  make build                        Build both client and server without running."
 	@echo "  make debug                        Build client and server with debug flags."
 	@echo "  make release                      Build client and server with optimization flags."
 	@echo "  make client                       Build only the client executable."
@@ -79,14 +80,16 @@ help:
 	@echo "  make valgrind-server              Run the server under Valgrind."
 	@echo ""
 	@echo "Run:"
-	@echo "  make run-client                   Build and run the client on 127.0.0.1:5000."
-	@echo "  make run-server                   Build and run the server on port 5000."
+	@echo "  make run-client                   Build and run the client on 127.0.0.1:8080."
+	@echo "  make run-server                   Build and run the server on port 8080."
 	@echo ""
 	@echo "Clean:"
 	@echo "  make clean                        Remove binaries, test executables and coverage files."
 	@echo "  make clean-logs                   Remove log files while preserving logs/.gitkeep."
 
 all: debug
+
+build: debug
 
 # =========================
 # BUILDS
@@ -208,20 +211,20 @@ valgrind-test-game: test-game
 	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./$(TEST_GAME_BIN)
 
 valgrind-client: debug
-	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./$(CLIENT_BIN) 127.0.0.1 5000
+	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./$(CLIENT_BIN) 127.0.0.1 8080
 
 valgrind-server: debug
-	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./$(SERVER_BIN) 5000
+	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./$(SERVER_BIN) 8080
 
 # =========================
 # RUN
 # =========================
 
 run-client: client
-	./$(CLIENT_BIN) 127.0.0.1 5000
+	./$(CLIENT_BIN) 127.0.0.1 8080
 
 run-server: server
-	./$(SERVER_BIN) 5000
+	./$(SERVER_BIN) 8080
 
 # =========================
 # CLEAN
