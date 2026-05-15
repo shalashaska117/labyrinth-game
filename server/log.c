@@ -78,6 +78,9 @@ int log_msg(const char *message) {
     write_res = (write(log_fd, buf, (size_t)n) == (ssize_t)n) ? 0 : -1;
     pthread_mutex_unlock(&log_mutex);
 
+    fprintf(stderr, "%s", buf);
+    fflush(stderr);
+
     return write_res;
 }
 

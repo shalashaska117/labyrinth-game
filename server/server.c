@@ -1348,6 +1348,11 @@ int main(int argc, char *argv[]) {
         pthread_detach(periodic_thread);
     }
 
+    printf("=== LSO Server ===\n");
+    printf("Port:      %d\n", port);
+    printf("Log file:  %s\n", log_path);
+    printf("Server is running in LOBBY. Press Ctrl+C to stop.\n\n");
+
     log_msg("SERVER STARTED in LOBBY");
 
     while (running) {
