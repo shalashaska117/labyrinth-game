@@ -9,6 +9,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <hiredis/hiredis.h>
+
 #include "../common/constants.h"
 #include "../common/protocol.h"
 #include "game.h"
@@ -55,6 +57,7 @@ static score_entry_t known_scores[MAX_USERS_DISPLAY];
 static int known_score_count = 0;
 static int server_fd = -1;
 static volatile sig_atomic_t running = 1;
+static redisContext *g_redis = NULL;
 static session_state_t session_state = LOBBY;
 static int timer_started = 0;
 static time_t session_start_time = 0;
@@ -494,6 +497,23 @@ static int block_if_not_playing(client_t *c) {
 }
 
 /*
+ * Checks whether a nickname is already used by another connected client.
+ *
+ * Returns 1 if taken by someone else, 0 otherwise.
+ * Must be called with client_mutex held.
+ */
+static int is_nickname_taken(const char *nick, const client_t *exclude) {
+    for (client_t *tmp = client_list; tmp != NULL; tmp = tmp->next) {
+        if (tmp != exclude && tmp->nickname[0] != '\0' &&
+            strncmp(tmp->nickname, "guest", 5) != 0 &&
+            strcmp(tmp->nickname, nick) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
  * Handles a login command.
  *
  * Input:
@@ -511,13 +531,49 @@ static int block_if_not_playing(client_t *c) {
  */
 static int handle_login(client_t *c, const char *line) {
     char nick[MAX_NICK] = {0};
+    char pass[MAX_PASSWORD] = {0};
 
-    sscanf(line + strlen(CMD_LOGIN), "%31s", nick);
+    sscanf(line + strlen(CMD_LOGIN), "%31s %63s", nick, pass);
 
-    if (nick[0] != '\0') {
-        snprintf(c->nickname, sizeof(c->nickname), "%s", nick);
+    if (nick[0] == '\0' || pass[0] == '\0') {
+        send_all(c->fd, "ERR usage: LOGIN <nickname> <password>\n",
+                 strlen("ERR usage: LOGIN <nickname> <password>\n"));
+        return 0;
     }
 
+    if (g_redis == NULL) {
+        send_all(c->fd, "ERR authentication unavailable\n",
+                 strlen("ERR authentication unavailable\n"));
+        return 0;
+    }
+
+    redisReply *reply = redisCommand(g_redis, "GET user:%s", nick);
+    if (reply == NULL || reply->type == REDIS_REPLY_NIL) {
+        if (reply != NULL) freeReplyObject(reply);
+        send_all(c->fd, "ERR user not registered\n",
+                 strlen("ERR user not registered\n"));
+        return 0;
+    }
+
+    if (reply->type != REDIS_REPLY_STRING || strcmp(reply->str, pass) != 0) {
+        freeReplyObject(reply);
+        send_all(c->fd, "ERR wrong password\n",
+                 strlen("ERR wrong password\n"));
+        return 0;
+    }
+
+    freeReplyObject(reply);
+
+    pthread_mutex_lock(&client_mutex);
+    if (is_nickname_taken(nick, c)) {
+        pthread_mutex_unlock(&client_mutex);
+        send_all(c->fd, "ERR nickname already in use\n",
+                 strlen("ERR nickname already in use\n"));
+        return 0;
+    }
+    pthread_mutex_unlock(&client_mutex);
+
+    snprintf(c->nickname, sizeof(c->nickname), "%s", nick);
     c->logged_in = 1;
     send_all(c->fd, "OK authenticated\n", strlen("OK authenticated\n"));
     broadcast_user_list();
@@ -542,13 +598,50 @@ static int handle_login(client_t *c, const char *line) {
  */
 static int handle_register(client_t *c, const char *line) {
     char nick[MAX_NICK] = {0};
+    char pass[MAX_PASSWORD] = {0};
 
-    sscanf(line + strlen(CMD_REGISTER), "%31s", nick);
+    sscanf(line + strlen(CMD_REGISTER), "%31s %63s", nick, pass);
 
-    if (nick[0] != '\0') {
-        snprintf(c->nickname, sizeof(c->nickname), "%s", nick);
+    if (nick[0] == '\0' || pass[0] == '\0') {
+        send_all(c->fd, "ERR usage: REGISTER <nickname> <password>\n",
+                 strlen("ERR usage: REGISTER <nickname> <password>\n"));
+        return 0;
     }
 
+    if (g_redis == NULL) {
+        send_all(c->fd, "ERR registration unavailable\n",
+                 strlen("ERR registration unavailable\n"));
+        return 0;
+    }
+
+    if (strncmp(nick, "guest", 5) == 0) {
+        send_all(c->fd, "ERR nickname cannot start with guest\n",
+                 strlen("ERR nickname cannot start with guest\n"));
+        return 0;
+    }
+
+    redisReply *reply = redisCommand(g_redis, "EXISTS user:%s", nick);
+    if (reply != NULL && reply->type == REDIS_REPLY_INTEGER && reply->integer == 1) {
+        freeReplyObject(reply);
+        send_all(c->fd, "ERR nickname already registered\n",
+                 strlen("ERR nickname already registered\n"));
+        return 0;
+    }
+    if (reply != NULL) freeReplyObject(reply);
+
+    reply = redisCommand(g_redis, "SET user:%s %s", nick, pass);
+    if (reply != NULL) freeReplyObject(reply);
+
+    pthread_mutex_lock(&client_mutex);
+    if (is_nickname_taken(nick, c)) {
+        pthread_mutex_unlock(&client_mutex);
+        send_all(c->fd, "ERR nickname already in use\n",
+                 strlen("ERR nickname already in use\n"));
+        return 0;
+    }
+    pthread_mutex_unlock(&client_mutex);
+
+    snprintf(c->nickname, sizeof(c->nickname), "%s", nick);
     c->logged_in = 1;
     send_all(c->fd, "OK authenticated\n", strlen("OK authenticated\n"));
     broadcast_user_list();
@@ -570,6 +663,25 @@ static int handle_register(client_t *c, const char *line) {
  * - Does not automatically start the match.
  * - Broadcasts the updated user list after readiness changes.
  */
+/*
+ * Checks whether every non-owner client in the lobby is logged in and ready.
+ *
+ * Must be called with client_mutex held.
+ * Returns 1 when there is at least one non-owner and all of them are ready.
+ */
+static int all_non_owners_ready(void) {
+    int found = 0;
+    for (client_t *tmp = client_list; tmp != NULL; tmp = tmp->next) {
+        if (!tmp->is_owner) {
+            found = 1;
+            if (!tmp->logged_in || !tmp->ready) {
+                return 0;
+            }
+        }
+    }
+    return found;
+}
+
 static int handle_ready(client_t *c) {
     session_state_t state;
 
@@ -722,42 +834,14 @@ static int get_other_positions(client_t *self, position_t *out, int max) {
 }
 
 /*
- * Starts the gameplay session if the requester is the owner.
+ * Internal: initializes the maze, assigns spawn positions, sets session
+ * state to PLAYING, starts the timer and broadcasts SESSION STARTED.
  *
- * Input:
- * - c: client that sent START.
- *
- * Output:
- * - Changes the session state to PLAYING when allowed.
- * - Sends or broadcasts a protocol response.
- *
- * Behavior:
- * - Rejects non-owner clients.
- * - Rejects repeated START commands after the game begins.
- * - Initializes the maze and starts one detached timer thread.
+ * Must be called with session_mutex held. The caller is responsible for
+ * validating that the session is in LOBBY.
  */
-static int handle_start(client_t *c) {
+static void start_game_session(void) {
     pthread_t timer_thread;
-
-    pthread_mutex_lock(&session_mutex);
-
-    if (session_state == PLAYING) {
-        pthread_mutex_unlock(&session_mutex);
-        send_all(c->fd, "ERR game already started\n", strlen("ERR game already started\n"));
-        return 0;
-    }
-
-    if (session_state == FINISHED) {
-        pthread_mutex_unlock(&session_mutex);
-        send_all(c->fd, "ERR game finished\n", strlen("ERR game finished\n"));
-        return 0;
-    }
-
-    if (!c->is_owner) {
-        pthread_mutex_unlock(&session_mutex);
-        send_all(c->fd, "ERR only owner can start\n", strlen("ERR only owner can start\n"));
-        return 0;
-    }
 
     pthread_mutex_lock(&maze_mutex);
     game_init(maze);
@@ -779,10 +863,58 @@ static int handle_start(client_t *c) {
         }
     }
 
-    pthread_mutex_unlock(&session_mutex);
-
     client_list_broadcast("SESSION STARTED\n");
     log_msg("SESSION STARTED");
+}
+
+/*
+ * Starts the gameplay session if the requester is the owner.
+ *
+ * Input:
+ * - c: client that sent START.
+ *
+ * Output:
+ * - Changes the session state to PLAYING when allowed.
+ * - Sends or broadcasts a protocol response.
+ *
+ * Behavior:
+ * - Rejects non-owner clients.
+ * - Rejects repeated START commands after the game begins.
+ * - Initializes the maze and starts one detached timer thread.
+ */
+static int handle_start(client_t *c) {
+    pthread_mutex_lock(&session_mutex);
+
+    if (session_state == PLAYING) {
+        pthread_mutex_unlock(&session_mutex);
+        send_all(c->fd, "ERR game already started\n", strlen("ERR game already started\n"));
+        return 0;
+    }
+
+    if (session_state == FINISHED) {
+        pthread_mutex_unlock(&session_mutex);
+        send_all(c->fd, "ERR game finished\n", strlen("ERR game finished\n"));
+        return 0;
+    }
+
+    if (!c->is_owner) {
+        pthread_mutex_unlock(&session_mutex);
+        send_all(c->fd, "ERR only owner can start\n", strlen("ERR only owner can start\n"));
+        return 0;
+    }
+
+    pthread_mutex_lock(&client_mutex);
+    if (!all_non_owners_ready()) {
+        pthread_mutex_unlock(&client_mutex);
+        pthread_mutex_unlock(&session_mutex);
+        send_all(c->fd, "ERR not all players are ready\n",
+                 strlen("ERR not all players are ready\n"));
+        return 0;
+    }
+    pthread_mutex_unlock(&client_mutex);
+
+    start_game_session();
+    pthread_mutex_unlock(&session_mutex);
     return 0;
 }
 
@@ -816,6 +948,19 @@ static int handle_move(client_t *c, const char *line) {
     }
 
     if (block_if_not_playing(c)) {
+        return 0;
+    }
+
+    if (c->exit_reached) {
+        pthread_mutex_lock(&client_mutex);
+        other_count = get_other_positions(c, other_positions, MAX_USERS_DISPLAY);
+        pthread_mutex_unlock(&client_mutex);
+
+        pthread_mutex_lock(&maze_mutex);
+        game_build_local_view(maze, buf, sizeof(buf), -1, -1, c->visible, other_positions, other_count);
+        pthread_mutex_unlock(&maze_mutex);
+
+        send_all(c->fd, buf, strlen(buf));
         return 0;
     }
 
@@ -898,6 +1043,8 @@ static int handle_local(client_t *c) {
     char buf[BUFFER_SIZE];
     position_t other_positions[MAX_USERS_DISPLAY];
     int other_count;
+    int px;
+    int py;
 
     if (block_if_not_playing(c)) {
         return 0;
@@ -907,8 +1054,11 @@ static int handle_local(client_t *c) {
     other_count = get_other_positions(c, other_positions, MAX_USERS_DISPLAY);
     pthread_mutex_unlock(&client_mutex);
 
+    px = c->exit_reached ? -1 : c->pos.x;
+    py = c->exit_reached ? -1 : c->pos.y;
+
     pthread_mutex_lock(&maze_mutex);
-    game_build_local_view(maze, buf, sizeof(buf), c->pos.x, c->pos.y, c->visible, other_positions, other_count);
+    game_build_local_view(maze, buf, sizeof(buf), px, py, c->visible, other_positions, other_count);
     pthread_mutex_unlock(&maze_mutex);
 
     send_all(c->fd, buf, strlen(buf));
@@ -932,6 +1082,8 @@ static int handle_global(client_t *c) {
     char buf[BUFFER_SIZE];
     position_t other_positions[MAX_USERS_DISPLAY];
     int other_count;
+    int px;
+    int py;
 
     if (block_if_not_playing(c)) {
         return 0;
@@ -941,8 +1093,11 @@ static int handle_global(client_t *c) {
     other_count = get_other_positions(c, other_positions, MAX_USERS_DISPLAY);
     pthread_mutex_unlock(&client_mutex);
 
+    px = c->exit_reached ? -1 : c->pos.x;
+    py = c->exit_reached ? -1 : c->pos.y;
+
     pthread_mutex_lock(&maze_mutex);
-    game_build_global_view(maze, buf, sizeof(buf), c->pos.x, c->pos.y, c->visible, other_positions, other_count);
+    game_build_global_view(maze, buf, sizeof(buf), px, py, c->visible, other_positions, other_count);
     pthread_mutex_unlock(&maze_mutex);
 
     send_all(c->fd, buf, strlen(buf));
@@ -991,22 +1146,33 @@ static int handle_list(client_t *c) {
 static int score_compare(const void *a, const void *b) {
     const score_entry_t *sa = (const score_entry_t *)a;
     const score_entry_t *sb = (const score_entry_t *)b;
+    int score_a;
+    int score_b;
+
+    if (!sa->exit_reached && !sb->exit_reached) {
+        return sb->objects_collected - sa->objects_collected;
+    }
 
     if (sa->exit_reached != sb->exit_reached) {
         return sb->exit_reached - sa->exit_reached;
     }
 
-    if (sa->exit_reached && sb->exit_reached) {
-        if (sa->exit_time < sb->exit_time) {
-            return -1;
-        }
+    score_a = 0;
+    score_b = 0;
 
-        if (sa->exit_time > sb->exit_time) {
-            return 1;
-        }
+    if (sa->exit_reached && session_start_time > 0) {
+        int elapsed_a = (int)(sa->exit_time - session_start_time);
+        if (elapsed_a < 0) elapsed_a = 0;
+        score_a = sa->objects_collected * 100 - elapsed_a;
     }
 
-    return sb->objects_collected - sa->objects_collected;
+    if (sb->exit_reached && session_start_time > 0) {
+        int elapsed_b = (int)(sb->exit_time - session_start_time);
+        if (elapsed_b < 0) elapsed_b = 0;
+        score_b = sb->objects_collected * 100 - elapsed_b;
+    }
+
+    return score_b - score_a;
 }
 
 /*
@@ -1082,8 +1248,13 @@ static int handle_rank(client_t *c) {
 
     for (int i = 0; i < count && pos < (int)sizeof(buf); i++) {
         int elapsed = 0;
+        int score = 0;
+
         if (entries[i].exit_reached && session_start_time > 0) {
             elapsed = (int)(entries[i].exit_time - session_start_time);
+            if (elapsed < 0) elapsed = 0;
+            score = entries[i].objects_collected * 100 - elapsed;
+            if (score < 0) score = 0;
         }
 
         pos += snprintf(buf + pos,
@@ -1096,8 +1267,9 @@ static int handle_rank(client_t *c) {
         if (entries[i].exit_reached) {
             pos += snprintf(buf + pos,
                             sizeof(buf) - (size_t)pos,
-                            " - exit in %ds",
-                            elapsed >= 0 ? elapsed : 0);
+                            " - exit in %ds - Score: %d",
+                            elapsed >= 0 ? elapsed : 0,
+                            score);
         } else {
             pos += snprintf(buf + pos,
                             sizeof(buf) - (size_t)pos,
@@ -1157,9 +1329,11 @@ static void *periodic_global(void *arg) {
             char buf[BUFFER_SIZE];
             position_t other_positions[MAX_USERS_DISPLAY];
             int other_count = get_other_positions(c, other_positions, MAX_USERS_DISPLAY);
+            int px = c->exit_reached ? -1 : c->pos.x;
+            int py = c->exit_reached ? -1 : c->pos.y;
 
             pthread_mutex_lock(&maze_mutex);
-            game_build_global_view(maze, buf, sizeof(buf), c->pos.x, c->pos.y, c->visible, other_positions, other_count);
+            game_build_global_view(maze, buf, sizeof(buf), px, py, c->visible, other_positions, other_count);
             pthread_mutex_unlock(&maze_mutex);
 
             send_all(c->fd, buf, strlen(buf));
@@ -1351,6 +1525,21 @@ int main(int argc, char *argv[]) {
     printf("=== LSO Server ===\n");
     printf("Port:      %d\n", port);
     printf("Log file:  %s\n", log_path);
+
+    g_redis = redisConnect("127.0.0.1", 6379);
+    if (g_redis == NULL || g_redis->err) {
+        if (g_redis) {
+            fprintf(stderr, "Redis:     error: %s\n", g_redis->errstr);
+            redisFree(g_redis);
+        } else {
+            fprintf(stderr, "Redis:     cannot allocate context\n");
+        }
+        g_redis = NULL;
+        fprintf(stderr, "Redis:     WARNING - auth unavailable\n");
+    } else {
+        printf("Redis:     connected to 127.0.0.1:6379\n");
+    }
+
     printf("Server is running in LOBBY. Press Ctrl+C to stop.\n\n");
 
     log_msg("SERVER STARTED in LOBBY");
@@ -1392,5 +1581,10 @@ int main(int argc, char *argv[]) {
     close(server_fd);
     log_msg("SERVER SHUTDOWN");
     log_close();
+
+    if (g_redis) {
+        redisFree(g_redis);
+    }
+
     return 0;
 }

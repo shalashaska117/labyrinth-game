@@ -74,6 +74,8 @@ static void clear_session_display(ClientState *state) {
 
     state->show_global = 0;
     state->rank_count = 0;
+    state->exit_reached = 0;
+    state->time_remaining = 0;
 
     memset(state->rank_lines, 0, sizeof(state->rank_lines));
     memset(state->local_map, CELL_HIDDEN, sizeof(state->local_map));
@@ -337,6 +339,7 @@ int handle_server_message(int sock, const char *first_line, ClientState *state) 
             state->mode = MOVEMENT;
             state->show_global = 0;
             state->rank_count = 0;
+            state->exit_reached = 0;
         }
 
         state_set_status(state, "SESSION STARTED");

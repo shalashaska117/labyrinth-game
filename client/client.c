@@ -314,7 +314,7 @@ static int handle_movement_input(int sock, ClientState *state, char key) {
         return 0;
     }
 
-    if (key == 'q' || key == 'Q') {
+    if (key == 'Q') {
         send_all(sock, "QUIT\n", strlen("QUIT\n"));
         return 1;
     }

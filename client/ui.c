@@ -308,7 +308,7 @@ static void draw_command_help(void) {
     draw_row("  register <nickname> <password>   login <nickname> <password>");
     draw_row("  ready   start   reset   rank   users   local   global   quit");
     draw_row("Movement mode:");
-    draw_row("  Press TAB, then use W/A/S/D to move, G for global, L for local, q to quit.");
+    draw_row("  Press TAB, then use W/A/S/D to move, G for global, L for local, Q to quit.");
 }
 
 /*
@@ -333,29 +333,47 @@ static void draw_players(const ClientState *state) {
     }
 
     for (int i = 0; i < state->player_count; i++) {
-        char row[UI_CONTENT_WIDTH + 1];
         char colored[UI_CONTENT_WIDTH * 2];
         const char *src = state->player_list[i];
         int pos = 0;
+        int is_guest;
+
+        is_guest = (strncmp(src, "guest", 5) == 0);
 
         pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos, "  ");
 
+        if (is_guest) {
+            pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos, "%s", COLOR_BLUE);
+        } else {
+            pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos, "%s%s",
+                           COLOR_BOLD, COLOR_WHITE);
+        }
+
         while (*src && pos < (int)sizeof(colored) - 16) {
             if (strncmp(src, "[owner]", 7) == 0) {
-                pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos, "%s[owner]%s", COLOR_GREEN, COLOR_RESET);
+                pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos,
+                                "%s %s[owner]%s",
+                                COLOR_RESET, COLOR_GREEN, COLOR_RESET);
                 src += 7;
             } else if (strncmp(src, "[ready]", 7) == 0) {
-                pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos, "%s[ready]%s", COLOR_YELLOW, COLOR_RESET);
+                pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos,
+                                "%s %s[ready]%s",
+                                COLOR_RESET, COLOR_YELLOW, COLOR_RESET);
                 src += 7;
+            } else if (*src == ' ') {
+                pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos,
+                                "%s%s%c",
+                                COLOR_RESET, is_guest ? COLOR_BLUE : COLOR_WHITE, *src);
+                src++;
             } else {
                 colored[pos++] = *src;
                 src++;
             }
         }
 
+        pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos, "%s", COLOR_RESET);
         colored[pos] = '\0';
-        snprintf(row, sizeof(row), "%.80s", colored);
-        draw_row(row);
+        draw_row(colored);
     }
 }
 
@@ -467,7 +485,62 @@ static void draw_results(const ClientState *state) {
         draw_row("Type rank to view results.");
     } else {
         for (int i = 0; i < state->rank_count; i++) {
-            draw_row(state->rank_lines[i]);
+            char colored[UI_CONTENT_WIDTH * 2];
+            const char *rank_color;
+            int pos = 0;
+            int rank;
+
+            if (sscanf(state->rank_lines[i], "%d.", &rank) != 1) {
+                draw_row(state->rank_lines[i]);
+                continue;
+            }
+
+            if (rank == 1)
+                rank_color = COLOR_BOLD COLOR_GREEN;
+            else if (rank == 2)
+                rank_color = COLOR_YELLOW;
+            else if (rank == 3)
+                rank_color = COLOR_CYAN;
+            else
+                rank_color = "";
+
+            pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos,
+                            "%s%d.%s", rank_color, rank, COLOR_RESET);
+
+            const char *rest = state->rank_lines[i];
+            while (*rest && *rest != ' ') rest++;
+            while (*rest == ' ') rest++;
+
+            const char *name_end = strstr(rest, " - ");
+            if (name_end != NULL) {
+                size_t name_len = (size_t)(name_end - rest);
+                pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos,
+                                " " COLOR_BOLD "%.*s" COLOR_RESET,
+                                (int)(name_len < UI_CONTENT_WIDTH ? name_len : UI_CONTENT_WIDTH),
+                                rest);
+
+                const char *after_name = name_end + 3;
+                const char *score_tag = strstr(after_name, "Score:");
+                if (score_tag != NULL) {
+                    size_t prefix_len = (size_t)(score_tag - after_name);
+                    pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos,
+                                    " - %.*s",
+                                    (int)(prefix_len < UI_CONTENT_WIDTH ? prefix_len : UI_CONTENT_WIDTH),
+                                    after_name);
+                    pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos,
+                                    " %sScore:%s %s",
+                                    COLOR_MAGENTA, COLOR_RESET,
+                                    score_tag + 6);
+                } else {
+                    pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos,
+                                    " - %s", after_name);
+                }
+            } else {
+                pos += snprintf(colored + pos, sizeof(colored) - (size_t)pos,
+                                " %s", rest);
+            }
+
+            draw_row(colored);
         }
     }
 
@@ -500,7 +573,7 @@ static void draw_input_area(const ClientState *state, const char *mode) {
         snprintf(input_line, sizeof(input_line), "> %s", state->input_buffer);
         draw_row(input_line);
     } else {
-        draw_row("Keys: WASD move | G global | L local | TAB command | q quit");
+        draw_row("Keys: WASD move | G global | L local | TAB command | Q quit");
     }
 
     draw_row(mode);

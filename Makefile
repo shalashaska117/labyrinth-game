@@ -9,6 +9,10 @@ COVERAGE_FLAGS=-g -O0 --coverage
 
 PTHREAD_FLAGS=-pthread
 
+HIREDIS_PREFIX=/opt/homebrew/opt/hiredis
+HIREDIS_CFLAGS=-I$(HIREDIS_PREFIX)/include
+HIREDIS_LDFLAGS=-L$(HIREDIS_PREFIX)/lib -lhiredis
+
 COMMON=common/protocol.c
 
 CLIENT_SRC=client/client.c client/ui.c client/command.c client/response.c client/state.c $(COMMON)
@@ -105,7 +109,7 @@ client: $(CLIENT_SRC)
 	$(CC) $(CFLAGS) -o $(CLIENT_BIN) $(CLIENT_SRC)
 
 server: $(SERVER_SRC)
-	$(CC) $(CFLAGS) -o $(SERVER_BIN) $(SERVER_SRC) $(PTHREAD_FLAGS)
+	$(CC) $(CFLAGS) $(HIREDIS_CFLAGS) -o $(SERVER_BIN) $(SERVER_SRC) $(PTHREAD_FLAGS) $(HIREDIS_LDFLAGS)
 
 # =========================
 # TESTS
