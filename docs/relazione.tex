@@ -1,0 +1,444 @@
+\documentclass[a4paper,11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{amsmath}
+
+\geometry{margin=2.5cm}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    pdftitle={Relazione Progetto LSO -- Labirinto con oggetti e uscita}
+}
+
+\lstdefinestyle{cstyle}{
+    language=C,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{gray},
+    stringstyle=\color{teal},
+    breaklines=true,
+    frame=single,
+    columns=fullflexible,
+    showstringspaces=false
+}
+\lstset{style=cstyle}
+
+\title{\textbf{Relazione del progetto LSO}\\
+Traccia A -- Labirinto con oggetti e uscita}
+\author{
+    Nomi componenti del gruppo \\
+    \texttt{(inserire qui i nomi)}
+}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{Introduzione}
+
+Il progetto implementa un sistema client--server concorrente in C per la gestione di
+una partita in un labirinto 2D con oggetti, uscite e più giocatori contemporanei.
+Il server mantiene la mappa completa, gestisce la posizione dei client, la scoperta
+progressiva delle celle e il punteggio finale. Il client fornisce un'interfaccia
+testuale interattiva (TUI) per login, registrazione, movimento, consultazione delle
+mappe, elenco utenti e classifica.
+
+La soluzione segue la traccia A, rispettando l'uso di socket TCP, la separazione
+tra protocollo applicativo e livello di trasporto e la comunicazione asincrona
+dal server verso i client. Il codice è organizzato in moduli separati: \texttt{server/}
+(logica di gioco e gestione connessioni), \texttt{client/} (interfaccia utente e
+parsing risposte) e \texttt{common/} (protocollo e costanti condivise).
+
+\section{Guida d'uso}
+
+\subsection{Compilazione}
+
+Il progetto usa un \texttt{Makefile} con i seguenti target principali:
+
+\begin{lstlisting}[language=bash]
+make build     # compila client e server (debug)
+make run-server # compila e avvia il server sulla porta 8080
+make run-client # compila e avvia il client su 127.0.0.1:8080
+make test      # compila ed esegue la suite di test (49 test)
+\end{lstlisting}
+
+La compilazione del server richiede il supporto ai thread POSIX (\texttt{-pthread})
+e alla libreria \texttt{hiredis} per l'autenticazione via Redis. La compilazione
+del client non richiede dipendenze esterne oltre alla libc standard.
+
+Il server è composto da \texttt{server/server.c}, \texttt{server/game.c},
+\texttt{server/log.c} e \texttt{common/protocol.c}. Il client da
+\texttt{client/client.c}, \texttt{client/ui.c}, \texttt{client/command.c},
+\texttt{client/response.c}, \texttt{client/state.c} e \texttt{common/protocol.c}.
+
+\subsection{Avvio del server}
+
+Il server accetta opzionalmente una porta e un percorso per il file di log.
+I valori di default sono porta \texttt{8080} e log \texttt{logs/server.log}.
+
+\begin{lstlisting}[language=bash]
+./server_app                  # default: porta 8080
+./server_app 9090             # porta personalizzata
+./server_app 8080 mylog.txt   # porta e log personalizzati
+\end{lstlisting}
+
+All'avvio il server stampa a terminale:
+
+\begin{lstlisting}[basicstyle=\ttfamily\small,frame=none]
+=== LSO Server ===
+Port:      8080
+Log file:  logs/server.log
+Redis:     connected to 127.0.0.1:6379
+Server is running in LOBBY. Press Ctrl+C to stop.
+\end{lstlisting}
+
+Quindi:
+\begin{itemize}[topsep=0.3em]
+    \item inizializza il logger e il socket TCP di ascolto;
+    \item si connette a Redis su \texttt{127.0.0.1:6379} per gestire le credenziali
+          utente (se Redis non è disponibile, l'autenticazione viene disabilitata
+          e il server stampa un avviso);
+    \item avvia il thread periodico per l'invio delle mappe globali mascherate
+          e il timer di sessione.
+\end{itemize}
+
+\subsection{Avvio del client}
+
+\begin{lstlisting}[language=bash]
+./client_app 127.0.0.1 8080
+\end{lstlisting}
+
+Il client usa \texttt{getaddrinfo()} per risolvere hostname e indirizzi numerici,
+connettendosi via socket TCP. Subito dopo la connessione, il terminale viene messo
+in modalità raw per consentire l'input immediato da tastiera (movimento diretto
+con i tasti \texttt{W/A/S/D}).
+
+\subsection{Uso interattivo}
+
+Il client prevede due modalità commutabili con il tasto \texttt{TAB}:
+\begin{itemize}[topsep=0.3em]
+    \item \textbf{Command mode} -- i comandi vengono digitati e confermati con
+          \texttt{Invio}. Viene mostrato un prompt \texttt{>} con l'input buffer
+          corrente e una lista dei comandi disponibili.
+    \item \textbf{Movement mode} -- i tasti \texttt{W/A/S/D} inviano immediatamente
+          i movimenti al server. \texttt{G} richiede la mappa globale mascherata,
+          \texttt{L} torna alla mappa locale. \texttt{Q} (maiuscola) invia \texttt{QUIT}
+          e disconnette il client.
+\end{itemize}
+
+Comandi testuali supportati:
+\begin{itemize}[topsep=0.3em]
+    \item \texttt{register <nickname> <password>} -- registra un nuovo utente
+    \item \texttt{login <nickname> <password>} -- autentica un utente esistente
+    \item \texttt{ready} -- marca il giocatore come pronto nella lobby
+    \item \texttt{start} -- (solo owner) avvia la partita
+    \item \texttt{reset} -- (solo owner) riporta la sessione in lobby dopo la fine
+    \item \texttt{rank} -- richiede la classifica
+    \item \texttt{users} -- richiede la lista degli utenti connessi
+    \item \texttt{local} -- richiede la mappa locale (finestra $5\times5$)
+    \item \texttt{global} -- richiede la mappa globale mascherata
+    \item \texttt{quit} -- disconnette il client
+\end{itemize}
+
+\section{Protocollo applicativo}
+
+\subsection{Struttura generale}
+
+Il protocollo è line-based: ogni messaggio è una riga testuale terminata da
+\texttt{\textbackslash n}. I messaggi multi-linea (mappe, liste utenti, classifica)
+terminano con una riga \texttt{END}. Prefissi testuali distinguono i tipi di risposta
+(\texttt{OK}, \texttt{ERR}, \texttt{SESSION}, \texttt{MAP}, \texttt{USERS},
+\texttt{RANK}, \texttt{TIME}).
+
+\begin{table}[h]
+\centering
+\begin{tabular}{l|l|l}
+\textbf{Prefisso} & \textbf{Esempio} & \textbf{Descrizione} \\
+\hline
+\texttt{OK} & \texttt{OK authenticated} & Operazione riuscita \\
+\texttt{ERR} & \texttt{ERR wrong password} & Errore \\
+\texttt{SESSION} & \texttt{SESSION STARTED} & Evento di sessione \\
+\texttt{MAP LOCAL} & \texttt{MAP LOCAL 5 5} & Mappa locale (finestra $5\times5$) \\
+\texttt{MAP GLOBAL} & \texttt{MAP GLOBAL 21 21} & Mappa globale mascherata \\
+\texttt{USERS} & \texttt{USERS 3} & Lista utenti connessi \\
+\texttt{RANK} & \texttt{RANK 3} & Classifica finale \\
+\texttt{TIME} & \texttt{TIME 245} & Tempo rimanente in secondi \\
+\end{tabular}
+\caption{Prefissi del protocollo di risposta}
+\end{table}
+
+\subsection{Comandi client $\to$ server}
+
+I comandi vengono tradotti dal modulo \texttt{client/command.c} nel formato
+protocollare. Il client supporta anche varianti con slash iniziale
+(\texttt{/ready} $\equiv$ \texttt{ready}) e gestisce il comando \texttt{help}
+localmente senza inviare dati al server.
+
+\subsection{Mappe locale e globale}
+
+La mappa locale ($5\times5$ celle, centrata sul giocatore) mostra solo le
+celle già scoperte dal giocatore. La mappa globale ($21\times21$ celle)
+rappresenta l'intera matrice di gioco con le celle non ancora esplorate
+sostituite dal simbolo \texttt{?} (cella nascosta). Il server invia la mappa
+globale periodicamente ogni \texttt{T\_INTERVAL} (5 secondi) a tutti i client
+durante la partita.
+
+\subsection{Lista utenti e classifica}
+
+La lista utenti è inviata automaticamente dopo login, register, ready, reset e
+disconnessione. Ogni riga mostra il nickname con marcatori \texttt{[owner]} e
+\texttt{[ready]}. La classifica combina i punteggi dei giocatori ancora connessi
+e di quelli già disconnessi, ordinati per punteggio decrescente.
+
+\section{Dettagli implementativi}
+
+\subsection{Architettura concorrente del server}
+
+Il server è multithread:
+\begin{itemize}[topsep=0.3em]
+    \item un thread per ogni client connesso (creato con \texttt{pthread\_create}
+          e detached con \texttt{pthread\_detach});
+    \item un thread periodico (\texttt{periodic\_global}) che ogni
+          \texttt{T\_INTERVAL} secondi invia la mappa globale mascherata e il
+          tempo rimanente a tutti i client;
+    \item un thread \texttt{session\_timer} che decreta la fine della sessione
+          dopo \texttt{SESSION\_DURATION} (300) secondi.
+\end{itemize}
+
+La sincronizzazione è realizzata con quattro mutex indipendenti:
+\begin{itemize}[topsep=0.3em]
+    \item \texttt{maze\_mutex} -- protegge la matrice del labirinto;
+    \item \texttt{client\_mutex} -- protegge la lista dei client connessi;
+    \item \texttt{score\_mutex} -- protegge la tabella dei punteggi;
+    \item \texttt{session\_mutex} -- protegge lo stato della sessione
+          e il timer.
+\end{itemize}
+
+La separazione dei mutex riduce la contesa tra i thread.
+
+\subsection{Stati della sessione}
+
+Il server gestisce tre stati:
+\begin{itemize}[topsep=0.3em]
+    \item \textbf{LOBBY} -- i client possono registrarsi, autenticarsi
+          e dichiararsi pronti (\texttt{READY}). Solo l'owner può avviare
+          la partita con \texttt{START}.
+    \item \textbf{PLAYING} -- la partita è attiva. I client possono muoversi,
+          raccogliere oggetti, consultare le mappe. Il server invia
+          periodicamente la mappa globale e il tempo rimanente.
+    \item \textbf{FINISHED} -- la partita è terminata. I client possono
+          consultare la classifica (\texttt{RANK}). Solo l'owner può
+          resettare la sessione (\texttt{RESET}) per tornare in LOBBY.
+\end{itemize}
+
+\subsection{Avvio della partita}
+
+La partita parte quando l'owner invia \texttt{START} e \emph{tutti}
+i giocatori non-owner connessi e autenticati hanno inviato \texttt{READY}.
+Se qualche giocatore non è pronto, il server risponde con
+\texttt{ERR not all players are ready}.
+
+All'avvio:
+\begin{enumerate}[topsep=0.3em]
+    \item il labirinto viene generato (algoritmo ricorsivo di backtracking,
+          matrice $21\times21$, percorsi larghi una cella tra pareti spesse);
+    \item vengono piazzati 15 oggetti in celle vuote casuali e un'uscita
+          su uno dei quattro bordi;
+    \item a ogni client viene assegnata una posizione di spawn casuale
+          (round-robin da un pool di celle walkable a coordinate dispari);
+    \item viene avviato il timer di 300 secondi.
+\end{enumerate}
+
+\subsection{Generazione del labirinto}
+
+Il labirinto è generato con backtracking ricorsivo (depth-first search):
+\begin{enumerate}[topsep=0.3em]
+    \item l'intera matrice viene riempita di muri (\texttt{\#});
+    \item partendo dalla cella $(1,1)$, si sceglie una direzione casuale
+          con passo 2 e si apre la parete intermedia;
+    \item si ricorre sulla cella di destinazione;
+    \item la randomizzazione delle direzioni a ogni passo garantisce
+          labirinti diversi a ogni esecuzione.
+\end{enumerate}
+
+\subsection{Movimento, oggetti e uscita}
+
+Il movimento è a singola cella nelle quattro direzioni cardinali. Il
+server controlla che la cella di destinazione sia raggiungibile (non muro).
+In caso di movimento valido:
+\begin{itemize}[topsep=0.3em]
+    \item l'area di raggio \texttt{VIEW\_RADIUS} (2) attorno al giocatore
+          viene marcata come visibile in modo permanente;
+    \item se la cella contiene un oggetto, questo viene raccolto e rimosso
+          dalla mappa;
+    \item se la cella è l'uscita, il giocatore viene marcato come
+          \texttt{exit\_reached} (il suo marcatore scompare per gli altri
+          giocatori e lui passa in modalità spettatore potendo osservare
+          la mappa globale).
+\end{itemize}
+
+La sessione termina quando \emph{tutti} i giocatori hanno raggiunto l'uscita,
+oppure allo scadere del timer (300 secondi), oppure se tutti i giocatori
+si disconnettono.
+
+\subsection{Classifica e punteggio}
+
+Il punteggio è calcolato con la formula:
+\[
+\text{score} = \text{objects\_collected} \times 100 - \text{exit\_time\_seconds}
+\]
+dove \texttt{exit\_time\_seconds} è il tempo trascorso dall'inizio della
+sessione al momento in cui il giocatore ha raggiunto l'uscita. I giocatori
+che non raggiungono l'uscita non ricevono punteggio e sono ordinati
+per numero di oggetti raccolti.
+
+L'ordinamento usa \texttt{qsort} con comparatore personalizzato:
+prima i giocatori usciti (per punteggio decrescente), poi i non usciti
+(per numero di oggetti decrescente).
+
+La risposta \texttt{RANK} include per ogni giocatore il numero di oggetti
+raccolti, il tempo di uscita (se applicabile) e il punteggio calcolato.
+
+\subsection{Autenticazione e registrazione}
+
+Il server usa Redis come archivio esterno per le credenziali. La chiave
+usata è \texttt{user:<nickname>} con valore la password in chiaro.
+
+\begin{itemize}[topsep=0.3em]
+    \item \textbf{Registrazione}: controlla che il nickname non sia già
+          presente in Redis e che non inizi con \texttt{guest} (riservato
+          ai client non autenticati). In caso positivo, memorizza la
+          coppia nickname--password.
+    \item \textbf{Login}: recupera la password da Redis e la confronta
+          con quella fornita. Se il nickname non esiste risponde
+          \texttt{ERR user not registered}; se la password non corrisponde
+          risponde \texttt{ERR wrong password}.
+    \item \textbf{Occupazione nickname}: controlla che nessun altro client
+          connesso stia già usando quel nickname, per evitare conflitti.
+\end{itemize}
+
+Se Redis non è disponibile all'avvio, il server stampa un avviso e le
+operazioni di autenticazione rispondono con un errore.
+
+\subsection{Interfaccia utente (TUI)}
+
+Il client disegna un'interfaccia testuale persistente usando sequenze
+di escape ANSI e caratteri box-drawing UTF-8 (\texttt{┌─┐│└─┘}).
+La schermata viene ridisegnata a ogni cambiamento di stato.
+
+La TUI mostra:
+\begin{itemize}[topsep=0.3em]
+    \item in \textbf{LOBBY}: il titolo, le istruzioni per owner/non-owner,
+          la lista dei giocatori connessi con colori distinti (owner in verde
+          grassetto, giocatori pronti in giallo, guest in blu);
+    \item in \textbf{PLAYING}: la mappa locale o globale con legenda colorata
+          (\texttt{P}=giocatore in verde, \texttt{O}=altri in giallo,
+          \texttt{*}=oggetti in ciano, \texttt{E}=uscita in magenta,
+          \texttt{?}=nascosto in blu, \texttt{\#}=muro), il timer e
+          i controlli disponibili;
+    \item in \textbf{FINISHED}: la classifica con colori per le prime tre
+          posizioni (oro, argento, bronzo) e il punteggio in magenta.
+\end{itemize}
+
+La funzione \texttt{clear\_screen()} invia \texttt{\textbackslash033[2J\textbackslash033[H}
+per pulire lo schermo a ogni frame. La funzione \texttt{visible\_width()} gestisce
+correttamente le sequenze multi-byte UTF-8 e i codici di escape ANSI per
+mantenere l'allineamento dei bordi.
+
+\subsection{Logging}
+
+Il server registra in \texttt{logs/server.log} tutti gli eventi principali:
+avvio, connessioni (\texttt{CONNECTED: <nick>}), disconnessioni
+(\texttt{DISCONNECTED: <nick>}), inizio/fine/reset sessione.
+Ogni riga è preceduta da un timestamp nel formato
+\texttt{[YYYY-MM-DD HH:MM:SS]}. La scrittura è protetta da mutex
+poiché più thread client possono scrivere contemporaneamente.
+I messaggi di log vengono anche stampati su \texttt{stderr} per
+facilitare il debug in tempo reale.
+
+\subsection{Gestione delle disconnessioni}
+
+Quando un client si disconnette durante la partita:
+\begin{itemize}[topsep=0.3em]
+    \item il suo punteggio viene salvato nella tabella \texttt{known\_scores}
+          per apparire nella classifica finale;
+    \item se era l'owner, la proprietà passa al primo client rimanente;
+    \item se non rimangono client connessi, la sessione passa a
+          \texttt{FINISHED};
+    \item se tutti i giocatori rimanenti hanno già raggiunto l'uscita,
+          la sessione termina immediatamente.
+\end{itemize}
+
+\section{Mappa dei moduli}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{l|l|p{6cm}}
+\textbf{Modulo} & \textbf{File} & \textbf{Responsabilità} \\
+\hline
+Server core     & \texttt{server/server.c}   & Main loop, accept, gestione comandi, stati \\
+Game logic      & \texttt{server/game.c}     & Labirinto, movimento, visibilità, mappe \\
+Logging         & \texttt{server/log.c}      & Scrittura log con timestamp e mutex \\
+\hline
+Client core     & \texttt{client/client.c}   & Connessione, select loop, dispatch input \\
+TUI             & \texttt{client/ui.c}       & Rendering schermo, bordi, mappe, colori \\
+Commands        & \texttt{client/command.c}  & Traduzione comandi utente $\to$ protocollo \\
+Response parser & \texttt{client/response.c} & Parsing risposte server multi-linea \\
+Client state    & \texttt{client/state.c}    & Stato client, autenticazione pendente \\
+\hline
+Protocollo      & \texttt{common/protocol.h} & Costanti comandi/risposte, send\_all, recv\_line \\
+Costanti        & \texttt{common/constants.h}& Dimensioni, simboli, colori ANSI \\
+\end{tabular}
+\caption{Organizzazione modulare del progetto}
+\end{table}
+
+\section{Scelte progettuali}
+
+Le principali scelte progettuali sono state:
+\begin{enumerate}[topsep=0.3em]
+    \item \textbf{Separazione client/server/protocollo}: ogni livello è
+          indipendente e testabile singolarmente. Il client non conosce
+          la logica di gioco, il server non conosce l'interfaccia utente.
+    \item \textbf{Protocollo testuale line-based}: semplifica il debugging
+          (i messaggi sono leggibili con \texttt{telnet}) e il parsing
+          (ogni riga è autoconclusiva fino a \texttt{\textbackslash n}).
+    \item \textbf{Server multithread con mutex granulari}: un thread per
+          client più thread ausiliari, con mutex separati per mappa,
+          lista client, punteggi e stato sessione.
+    \item \textbf{TUI senza ncurses}: l'interfaccia usa solo sequenze
+          ANSI e caratteri UTF-8, senza dipendenze esterne, funzionante
+          su qualsiasi terminale moderno.
+    \item \textbf{Redis per credenziali}: archivio esterno leggero che
+          persiste le registrazioni finché il server Redis è attivo.
+          In caso di indisponibilità il server funziona comunque (con
+          autenticazione disabilitata).
+    \item \textbf{Test automatici}: suite di 49 test che coprono il parser
+          comandi, lo stato client, il parser risposte, il protocollo e
+          la logica di gioco (movimento, visibilità, pickup, uscita).
+\end{enumerate}
+
+\section{Conclusioni}
+
+Il progetto soddisfa i requisiti della traccia A: gestione concorrente di più
+client, labirinto con oggetti e uscita, scoperta progressiva delle celle,
+invio periodico della mappa globale mascherata, autenticazione utenti,
+logging e classifica finale con punteggio composito (oggetti $\times$ tempo
+di uscita). La struttura modulare, la suite di test e l'uso di strumenti
+standard (Makefile, Redis, ANSI escapes) rendono il sistema manutenibile
+e portabile.
+
+Tutto il codice sorgente, i test e la documentazione sono disponibili
+nel repository del progetto.
+
+\end{document}
