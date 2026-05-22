@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -15,6 +16,7 @@
 #include "../common/protocol.h"
 #include "game.h"
 #include "log.h"
+#include "redis_threadsafe.h"
 
 #define BACKLOG 16
 #define DEFAULT_PORT 8080
@@ -547,7 +549,7 @@ static int handle_login(client_t *c, const char *line) {
         return 0;
     }
 
-    redisReply *reply = redisCommand(g_redis, "GET user:%s", nick);
+    redisReply *reply = redis_command_locked(g_redis, "GET user:%s", nick);
     if (reply == NULL || reply->type == REDIS_REPLY_NIL) {
         if (reply != NULL) freeReplyObject(reply);
         send_all(c->fd, "ERR user not registered\n",
@@ -620,7 +622,7 @@ static int handle_register(client_t *c, const char *line) {
         return 0;
     }
 
-    redisReply *reply = redisCommand(g_redis, "EXISTS user:%s", nick);
+    redisReply *reply = redis_command_locked(g_redis, "EXISTS user:%s", nick);
     if (reply != NULL && reply->type == REDIS_REPLY_INTEGER && reply->integer == 1) {
         freeReplyObject(reply);
         send_all(c->fd, "ERR nickname already registered\n",
@@ -629,7 +631,7 @@ static int handle_register(client_t *c, const char *line) {
     }
     if (reply != NULL) freeReplyObject(reply);
 
-    reply = redisCommand(g_redis, "SET user:%s %s", nick, pass);
+    reply = redis_command_locked(g_redis, "SET user:%s %s", nick, pass);
     if (reply != NULL) freeReplyObject(reply);
 
     pthread_mutex_lock(&client_mutex);
@@ -1486,9 +1488,6 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
-
-    struct timeval tv = { 1, 0 };
-    setsockopt(server_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {

@@ -9,14 +9,13 @@ COVERAGE_FLAGS=-g -O0 --coverage
 
 PTHREAD_FLAGS=-pthread
 
-HIREDIS_PREFIX=/opt/homebrew/opt/hiredis
-HIREDIS_CFLAGS=-I$(HIREDIS_PREFIX)/include
-HIREDIS_LDFLAGS=-L$(HIREDIS_PREFIX)/lib -lhiredis
+HIREDIS_CFLAGS?=
+HIREDIS_LDFLAGS?=-lhiredis
 
 COMMON=common/protocol.c
 
 CLIENT_SRC=client/client.c client/ui.c client/command.c client/response.c client/state.c $(COMMON)
-SERVER_SRC=server/server.c server/game.c server/log.c $(COMMON)
+SERVER_SRC=server/server.c server/game.c server/log.c server/redis_threadsafe.c $(COMMON)
 
 CLIENT_BIN=client_app
 SERVER_BIN=server_app
@@ -151,7 +150,7 @@ test: test-command test-command-extended test-state test-state-extended test-res
 
 coverage: clean
 	$(CC) $(CFLAGS) $(COVERAGE_FLAGS) -o $(CLIENT_BIN) $(CLIENT_SRC)
-	$(CC) $(CFLAGS) $(COVERAGE_FLAGS) -o $(SERVER_BIN) $(SERVER_SRC) $(PTHREAD_FLAGS)
+	$(CC) $(CFLAGS) $(COVERAGE_FLAGS) $(HIREDIS_CFLAGS) -o $(SERVER_BIN) $(SERVER_SRC) $(PTHREAD_FLAGS) $(HIREDIS_LDFLAGS)
 	$(CC) $(CFLAGS) $(COVERAGE_FLAGS) -o $(TEST_COMMAND_BIN) $(TEST_COMMAND_SRC)
 	$(CC) $(CFLAGS) $(COVERAGE_FLAGS) -o $(TEST_COMMAND_EXT_BIN) $(TEST_COMMAND_EXT_SRC)
 	$(CC) $(CFLAGS) $(COVERAGE_FLAGS) -o $(TEST_STATE_BIN) $(TEST_STATE_SRC)
