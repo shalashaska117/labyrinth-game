@@ -1,7 +1,7 @@
 # Client-Server Communication Protocol
 
-This document describes the text-based protocol used by the `labyrinth-game` project.
-The protocol is line-based: every command and every response line ends with `\n`.
+This document describes the line-based text protocol used by the `labyrinth-game` project.
+Every command and every response line ends with `\n`.
 
 The client sends textual commands to the server through a TCP socket.
 The server replies with either single-line messages or multiline responses terminated by `END`.
@@ -12,14 +12,15 @@ The server replies with either single-line messages or multiline responses termi
 
 - Every command sent by the client ends with a newline.
 - Every response sent by the server ends with a newline.
-- Every multiline response must terminate with the following line:
+- Every multiline response terminates with:
 
 ```text
 END
 ```
 
 - Protocol commands are uppercase.
-- The client may accept lowercase user commands, but it must translate them into the corresponding uppercase protocol command before sending them to the server.
+- The client may accept lowercase commands and slash-prefixed commands, then translate them to uppercase protocol commands.
+- Some server messages may be asynchronous, especially `USERS`, `SESSION`, `MAP GLOBAL` and `TIME` messages.
 
 Example:
 
@@ -27,7 +28,7 @@ Example:
 start
 ```
 
-is sent to the server as:
+is sent as:
 
 ```text
 START
@@ -39,23 +40,21 @@ START
 
 ### REGISTER
 
-Registers or authenticates a user.
+Registers a new user and authenticates the current client.
 
 ```text
 REGISTER <nickname> <password>
-```
-
-Example:
-
-```text
-REGISTER pietro ciao123
 ```
 
 Possible responses:
 
 ```text
 OK authenticated
-ERR ...
+ERR usage: REGISTER <nickname> <password>
+ERR registration unavailable
+ERR nickname cannot start with guest
+ERR nickname already registered
+ERR nickname already in use
 ```
 
 ---
@@ -68,35 +67,41 @@ Authenticates an existing user.
 LOGIN <nickname> <password>
 ```
 
-Example:
-
-```text
-LOGIN pietro ciao123
-```
-
 Possible responses:
 
 ```text
 OK authenticated
-ERR ...
+ERR usage: LOGIN <nickname> <password>
+ERR authentication unavailable
+ERR user not registered
+ERR wrong password
+ERR nickname already in use
 ```
 
 ---
 
 ### LIST
 
-Requests the list of connected or known users.
+Requests the list of currently connected users.
 
 ```text
 LIST
+```
+
+Client aliases:
+
+```text
+users
+list
+/users
+/list
 ```
 
 Response format:
 
 ```text
 USERS <n>
-<nickname_1>
-<nickname_2>
+<nickname> [owner] [ready]
 ...
 END
 ```
@@ -104,11 +109,18 @@ END
 Example:
 
 ```text
-USERS 2
-pietro
-mario
+USERS 3
+pietro [owner]
+mario [ready]
+guest7
 END
 ```
+
+Notes:
+
+- `[owner]` marks the current session owner.
+- `[ready]` marks a client that issued `READY` in the lobby.
+- Unauthenticated clients are shown with generated guest names.
 
 ---
 
@@ -120,13 +132,15 @@ Marks the client as ready while the session is still in the lobby.
 READY
 ```
 
-Response:
+Possible responses:
 
 ```text
 OK ready
+ERR game already started
+ERR game finished
 ```
 
-Note: in the current implementation, readiness is tracked, but it does not automatically start the game.
+Readiness is tracked and shown in the `USERS` response, but it does not automatically start the game.
 
 ---
 
@@ -140,16 +154,20 @@ START
 
 Rules:
 
-- only the session owner can execute `START`;
-- the first connected client becomes the session owner;
-- if the session has already started, the server rejects the command;
-- when the session starts, the server generates the maze and moves to the `PLAYING` state.
+- only the current session owner can execute `START`;
+- the first connected client becomes the initial owner;
+- if the owner disconnects, ownership is reassigned;
+- `START` is accepted only in `LOBBY`;
+- all non-owner clients must be authenticated and ready;
+- the current implementation requires at least one non-owner client to be ready before the owner can start;
+- on success, the server generates the maze, assigns spawn positions, starts the timer and enters `PLAYING`.
 
 Possible responses:
 
 ```text
 SESSION STARTED
 ERR only owner can start
+ERR not all players are ready
 ERR game already started
 ERR game finished
 ```
@@ -173,24 +191,26 @@ LEFT
 RIGHT
 ```
 
-Examples:
+Client movement aliases:
 
 ```text
-MOVE UP
-MOVE DOWN
-MOVE LEFT
-MOVE RIGHT
+w -> MOVE UP
+a -> MOVE LEFT
+s -> MOVE DOWN
+d -> MOVE RIGHT
 ```
 
-Possible responses:
+Successful movement response:
 
 ```text
 MAP LOCAL <rows> <cols>
+<row_1>
+<row_2>
 ...
 END
 ```
 
-or:
+Possible error responses:
 
 ```text
 ERR game not started
@@ -199,15 +219,10 @@ ERR invalid direction
 ERR BLOCKED
 ```
 
-If an object is collected, the server may also send:
+Additional messages may follow a successful movement:
 
 ```text
 OK object collected
-```
-
-If the exit is reached, the server may send:
-
-```text
 OK exit found
 SESSION ENDED
 ```
@@ -222,7 +237,7 @@ Requests the local map around the player.
 LOCAL
 ```
 
-This command is valid only while the session is in the `PLAYING` state.
+Valid only during `PLAYING`.
 
 Response format:
 
@@ -231,18 +246,6 @@ MAP LOCAL <rows> <cols>
 <row_1>
 <row_2>
 ...
-END
-```
-
-Example:
-
-```text
-MAP LOCAL 5 5
-#####
-#   #
-# P #
-#   #
-#####
 END
 ```
 
@@ -263,7 +266,7 @@ Requests the masked global map.
 GLOBAL
 ```
 
-This command is valid only while the session is in the `PLAYING` state.
+Valid only during `PLAYING`.
 
 Response format:
 
@@ -275,21 +278,17 @@ MAP GLOBAL <rows> <cols>
 END
 ```
 
-Example:
+Map symbols:
 
 ```text
-MAP GLOBAL 21 21
-?????????????????????
-?P   ????????????????
-?????????????????????
-...
-END
+# wall
+  empty cell
+* object
+E exit
+P current player
+O other active player
+? hidden cell
 ```
-
-Important rule:
-
-- the current player's position must be displayed with `P`;
-- `P` has priority over hidden or visible cell rendering.
 
 Possible error responses:
 
@@ -308,11 +307,21 @@ Requests the current or final ranking.
 RANK
 ```
 
+Client aliases:
+
+```text
+rank
+scoreboard
+/rank
+/scoreboard
+```
+
 Response format:
 
 ```text
 RANK <n>
-<position> <nickname> <objects> objects [exit]
+<position>. <nickname> - <objects> objects - exit in <seconds>s - Score: <score>
+<position>. <nickname> - <objects> objects - did not exit
 ...
 END
 ```
@@ -321,17 +330,50 @@ Example:
 
 ```text
 RANK 3
-1 pietro 5 objects exit
-2 mario 3 objects
-3 lisa 0 objects
+1. pietro - 5 objects - exit in 42s - Score: 458
+2. mario - 3 objects - did not exit
+3. lisa - 0 objects - did not exit
 END
 ```
 
 Sorting rules:
 
 1. players who reached the exit are ranked before players who did not;
-2. among players who reached the exit, the earliest exit time wins;
-3. if needed, players with more collected objects are ranked higher.
+2. exiting players are scored using collected objects and elapsed time;
+3. non-exiting players are ranked by collected objects.
+
+---
+
+### RESET
+
+Returns a finished session back to the lobby.
+
+```text
+RESET
+```
+
+Client aliases:
+
+```text
+reset
+/reset
+```
+
+Rules:
+
+- only the current owner can execute `RESET`;
+- `RESET` is accepted only in `FINISHED`;
+- on success, the server clears remembered scores, readiness, positions and visibility;
+- connected clients remain connected;
+- the next `START` generates a new maze.
+
+Possible responses:
+
+```text
+SESSION LOBBY
+ERR only owner can reset
+ERR game not finished
+```
 
 ---
 
@@ -355,8 +397,6 @@ OK bye
 
 ### OK
 
-Generic successful response.
-
 ```text
 OK <message>
 ```
@@ -377,8 +417,6 @@ OK bye
 
 ### ERR
 
-Generic error response.
-
 ```text
 ERR <message>
 ```
@@ -390,36 +428,55 @@ ERR game not started
 ERR game already started
 ERR game finished
 ERR only owner can start
+ERR not all players are ready
+ERR only owner can reset
+ERR game not finished
 ERR invalid direction
 ERR BLOCKED
+ERR unknown command
 ```
 
 ---
 
 ### SESSION
 
-Notifies the client about a session state transition.
-
 ```text
 SESSION STARTED
 SESSION ENDED
+SESSION LOBBY
 ```
 
 Meaning:
 
 - `SESSION STARTED`: the game session has started;
-- `SESSION ENDED`: the game session has ended because of the timer, exit condition, or session termination condition.
+- `SESSION ENDED`: the game session has ended;
+- `SESSION LOBBY`: a finished session has been reset back to the lobby.
+
+---
+
+### TIME
+
+Contains the remaining session time in seconds.
+
+```text
+TIME <seconds>
+```
+
+Example:
+
+```text
+TIME 245
+```
+
+Sent periodically during `PLAYING`.
 
 ---
 
 ### USERS
 
-Multiline response containing the user list.
-
 ```text
 USERS <n>
-<nickname_1>
-<nickname_2>
+<nickname> [owner] [ready]
 ...
 END
 ```
@@ -427,8 +484,6 @@ END
 ---
 
 ### MAP LOCAL
-
-Multiline response containing the local map.
 
 ```text
 MAP LOCAL <rows> <cols>
@@ -442,8 +497,6 @@ END
 
 ### MAP GLOBAL
 
-Multiline response containing the masked global map.
-
 ```text
 MAP GLOBAL <rows> <cols>
 <row_1>
@@ -456,11 +509,10 @@ END
 
 ### RANK
 
-Multiline response containing the ranking.
-
 ```text
 RANK <n>
-<position> <nickname> <objects> objects [exit]
+<position>. <nickname> - <objects> objects - exit in <seconds>s - Score: <score>
+<position>. <nickname> - <objects> objects - did not exit
 ...
 END
 ```
@@ -468,8 +520,6 @@ END
 ---
 
 ## 4. Server Session States
-
-The server manages three session states:
 
 ```c
 typedef enum {
@@ -479,11 +529,7 @@ typedef enum {
 } session_state_t;
 ```
 
----
-
 ### LOBBY
-
-Initial state.
 
 Allowed commands:
 
@@ -503,19 +549,17 @@ Blocked commands:
 MOVE
 LOCAL
 GLOBAL
+RESET
 ```
 
-Typical response:
+Typical responses:
 
 ```text
 ERR game not started
+ERR game not finished
 ```
 
----
-
 ### PLAYING
-
-Active game state.
 
 Allowed commands:
 
@@ -528,30 +572,29 @@ RANK
 QUIT
 ```
 
-`START` is rejected:
+Rejected commands:
 
 ```text
-ERR game already started
+START -> ERR game already started
+READY -> ERR game already started
+RESET -> ERR game not finished
 ```
 
 During this state:
 
-- the maze is generated;
 - movement is enabled;
 - the session timer is active;
-- the server may send periodic global map updates.
-
----
+- the server may send periodic `MAP GLOBAL` updates;
+- the server may send periodic `TIME <seconds>` updates.
 
 ### FINISHED
-
-Final session state.
 
 Allowed commands:
 
 ```text
 RANK
 LIST
+RESET
 QUIT
 ```
 
@@ -562,6 +605,7 @@ MOVE
 LOCAL
 GLOBAL
 START
+READY
 ```
 
 Typical response:
@@ -572,9 +616,7 @@ ERR game finished
 
 ---
 
-## 5. Client States
-
-The client keeps session states consistent with the server:
+## 5. Client States and Input Modes
 
 ```c
 typedef enum {
@@ -584,8 +626,6 @@ typedef enum {
 } client_session_state_t;
 ```
 
-The client also supports two input modes:
-
 ```c
 typedef enum {
     MOVEMENT,
@@ -593,60 +633,37 @@ typedef enum {
 } input_mode_t;
 ```
 
----
-
 ### MOVEMENT
 
-Fast gameplay mode.
-
-Keys:
-
 ```text
-w -> MOVE UP
-a -> MOVE LEFT
-s -> MOVE DOWN
-d -> MOVE RIGHT
+w/W -> MOVE UP
+a/A -> MOVE LEFT
+s/S -> MOVE DOWN
+d/D -> MOVE RIGHT
 g/G -> toggle global overlay and request GLOBAL
 l/L -> request LOCAL
-q -> QUIT
+Q   -> QUIT
 TAB -> switch to COMMAND mode
 ```
 
----
-
 ### COMMAND
 
-Text command mode.
-
-Examples:
-
 ```text
-register pietro ciao123
-login pietro ciao123
+register <nickname> <credential>
+login <nickname> <credential>
 users
+list
 ready
 start
+reset
 rank
+scoreboard
 local
 global
 quit
 ```
 
-Slash commands are also supported:
-
-```text
-/register
-/login
-/users
-/ready
-/start
-/rank
-/local
-/global
-/quit
-```
-
-`TAB` switches back to `MOVEMENT` mode.
+Slash-prefixed variants are also accepted.
 
 ---
 
@@ -665,6 +682,7 @@ Commands:
 #define CMD_START    "START"
 #define CMD_READY    "READY"
 #define CMD_RANK     "RANK"
+#define CMD_RESET    "RESET"
 ```
 
 Responses:
@@ -695,10 +713,11 @@ Directions:
 #define DIR_RIGHT    "RIGHT"
 ```
 
-Session timer:
+Timers:
 
 ```c
 #define SESSION_DURATION 300
+#define T_INTERVAL 5
 ```
 
 ---
@@ -708,9 +727,8 @@ Session timer:
 Owner client:
 
 ```text
-REGISTER pietro ciao123
+REGISTER pietro <credential>
 LIST
-READY
 RANK
 START
 LOCAL
@@ -723,18 +741,32 @@ QUIT
 Second client:
 
 ```text
-REGISTER mario ciao123
-START
+REGISTER mario <credential>
 READY
 LIST
 RANK
 QUIT
 ```
 
-Expected response to `START` from the second client:
+Expected response to `START` from a non-owner client:
 
 ```text
 ERR only owner can start
+```
+
+Expected response to `START` from the owner when not all non-owner clients are ready:
+
+```text
+ERR not all players are ready
+```
+
+Finished session reset sequence:
+
+```text
+RANK
+RESET
+LIST
+START
 ```
 
 ---
@@ -742,8 +774,9 @@ ERR only owner can start
 ## 8. Implementation Notes
 
 - The server owns the game logic.
-- The client owns rendering, terminal input, and local display state.
+- The client owns rendering, terminal input and local display state.
 - `termios` is used only on the client side.
-- The server does not use `termios`.
 - Communication remains textual and human-readable.
 - Every multiline response must end with `END`.
+- `REGISTER` and `LOGIN` depend on the authentication backend in the current implementation.
+- The server may broadcast `USERS`, `SESSION`, `MAP GLOBAL` and `TIME` messages without a direct one-to-one request from the client.

@@ -408,20 +408,20 @@ static void draw_selected_map(const ClientState *state) {
         cols = state->local_cols;
     }
 
-    char border_line[UI_CONTENT_WIDTH + 1];
+    char border_line[(UI_CONTENT_WIDTH + 2) * 4 + 1];
     int bw = cols < UI_CONTENT_WIDTH ? cols : UI_CONTENT_WIDTH;
-    int bp = 0;
-    border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x8c;
-    for (int i = 0; i < bw; i++) { border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x80; }
-    border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x90;
-    border_line[bp] = '\0';
+    int bp = snprintf(border_line, sizeof(border_line), "%s", BORDER_TOP_LEFT);
+
+    for (int i = 0; i < bw && bp < (int)sizeof(border_line); i++) {
+        bp += snprintf(border_line + bp, sizeof(border_line) - (size_t)bp, "%s", BORDER_HORIZONTAL);
+    }
+
+    snprintf(border_line + bp, sizeof(border_line) - (size_t)bp, "%s", BORDER_TOP_RIGHT);
     draw_row(border_line);
 
     for (int r = 0; r < rows && r < 24; r++) {
-        char row[MAP_DRAW_LIMIT * 10 + 4];
-        int pos = 0;
-
-        row[pos++] = 0xe2; row[pos++] = 0x94; row[pos++] = 0x82;
+        char row[MAP_DRAW_LIMIT * 16 + 16];
+        int pos = snprintf(row, sizeof(row), "%s", BORDER_VERTICAL);
 
         for (int c = 0; c < cols && c < MAP_DRAW_LIMIT; c++) {
             char cell = map[r * cols + c];
@@ -451,16 +451,17 @@ static void draw_selected_map(const ClientState *state) {
             }
         }
 
-        row[pos++] = 0xe2; row[pos++] = 0x94; row[pos++] = 0x82;
-        row[pos] = '\0';
+        snprintf(row + pos, sizeof(row) - (size_t)pos, "%s", BORDER_VERTICAL);
         draw_row(row);
     }
 
-    bp = 0;
-    border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x94;
-    for (int i = 0; i < bw; i++) { border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x80; }
-    border_line[bp++] = 0xe2; border_line[bp++] = 0x94; border_line[bp++] = 0x98;
-    border_line[bp] = '\0';
+    bp = snprintf(border_line, sizeof(border_line), "%s", BORDER_BOTTOM_LEFT);
+
+    for (int i = 0; i < bw && bp < (int)sizeof(border_line); i++) {
+        bp += snprintf(border_line + bp, sizeof(border_line) - (size_t)bp, "%s", BORDER_HORIZONTAL);
+    }
+
+    snprintf(border_line + bp, sizeof(border_line) - (size_t)bp, "%s", BORDER_BOTTOM_RIGHT);
     draw_row(border_line);
 }
 
