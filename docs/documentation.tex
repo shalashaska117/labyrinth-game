@@ -70,7 +70,7 @@ Il progetto usa un \texttt{Makefile} con i seguenti target principali:
 make build     # compila client e server (debug)
 make run-server # compila e avvia il server sulla porta 8080
 make run-client # compila e avvia il client su 127.0.0.1:8080
-make test      # compila ed esegue la suite di test (49 test)
+make test      # compila ed esegue la suite di test automatici
 \end{lstlisting}
 
 La compilazione del server richiede il supporto ai thread POSIX (\texttt{-pthread})
@@ -78,7 +78,8 @@ e alla libreria \texttt{hiredis} per l'autenticazione via Redis. La compilazione
 del client non richiede dipendenze esterne oltre alla libc standard.
 
 Il server è composto da \texttt{server/server.c}, \texttt{server/game.c},
-\texttt{server/log.c} e \texttt{common/protocol.c}. Il client da
+\texttt{server/log.c}, \texttt{server/redis\_threadsafe.c} e
+\texttt{common/protocol.c}. Il client da
 \texttt{client/client.c}, \texttt{client/ui.c}, \texttt{client/command.c},
 \texttt{client/response.c}, \texttt{client/state.c} e \texttt{common/protocol.c}.
 
@@ -110,7 +111,8 @@ Quindi:
           utente (se Redis non è disponibile, l'autenticazione viene disabilitata
           e il server stampa un avviso);
     \item avvia il thread periodico per l'invio delle mappe globali mascherate
-          e il timer di sessione.
+          (\texttt{periodic\_global}). Il timer di sessione viene invece creato
+          all'inizio di ogni partita, quando l'owner invia \texttt{START}.
 \end{itemize}
 
 \subsection{Avvio del client}
@@ -216,13 +218,17 @@ Il server è multithread:
           dopo \texttt{SESSION\_DURATION} (300) secondi.
 \end{itemize}
 
-La sincronizzazione è realizzata con quattro mutex indipendenti:
+La sincronizzazione è realizzata con cinque mutex indipendenti:
 \begin{itemize}[topsep=0.3em]
     \item \texttt{maze\_mutex} -- protegge la matrice del labirinto;
     \item \texttt{client\_mutex} -- protegge la lista dei client connessi;
     \item \texttt{score\_mutex} -- protegge la tabella dei punteggi;
     \item \texttt{session\_mutex} -- protegge lo stato della sessione
-          e il timer.
+          e il timer;
+    \item \texttt{redis\_mutex} (nel modulo \texttt{redis\_threadsafe}) --
+          serializza l'accesso al contesto Redis condiviso, evitando
+          accessi concorrenti da parte dei thread client durante login
+          e registrazione.
 \end{itemize}
 
 La separazione dei mutex riduce la contesa tra i thread.
@@ -313,7 +319,11 @@ raccolti, il tempo di uscita (se applicabile) e il punteggio calcolato.
 \subsection{Autenticazione e registrazione}
 
 Il server usa Redis come archivio esterno per le credenziali. La chiave
-usata è \texttt{user:<nickname>} con valore la password in chiaro.
+usata è \texttt{user:<nickname>} con valore la password. Le password sono
+memorizzate in chiaro: questa scelta è stata adottata per semplicità
+didattica e per concentrare il progetto sugli aspetti di comunicazione,
+concorrenza e gestione della sessione. In un sistema reale sarebbe
+necessario usare hashing sicuro delle password.
 
 \begin{itemize}[topsep=0.3em]
     \item \textbf{Registrazione}: controlla che il nickname non sia già
@@ -334,7 +344,8 @@ operazioni di autenticazione rispondono con un errore.
 \subsection{Interfaccia utente (TUI)}
 
 Il client disegna un'interfaccia testuale persistente usando sequenze
-di escape ANSI e caratteri box-drawing UTF-8 (\texttt{┌─┐│└─┘}).
+di escape ANSI e caratteri box-drawing UTF-8 (bordi orizzontali e
+verticali), evitando dipendenze da ncurses.
 La schermata viene ridisegnata a ogni cambiamento di stato.
 
 La TUI mostra:
@@ -390,6 +401,7 @@ Quando un client si disconnette durante la partita:
 Server core     & \texttt{server/server.c}   & Main loop, accept, gestione comandi, stati \\
 Game logic      & \texttt{server/game.c}     & Labirinto, movimento, visibilità, mappe \\
 Logging         & \texttt{server/log.c}      & Scrittura log con timestamp e mutex \\
+Redis thread-safe & \texttt{server/redis\_threadsafe.c} & Mutex per contesto Redis condiviso \\
 \hline
 Client core     & \texttt{client/client.c}   & Connessione, select loop, dispatch input \\
 TUI             & \texttt{client/ui.c}       & Rendering schermo, bordi, mappe, colori \\
@@ -415,7 +427,7 @@ Le principali scelte progettuali sono state:
           (ogni riga è autoconclusiva fino a \texttt{\textbackslash n}).
     \item \textbf{Server multithread con mutex granulari}: un thread per
           client più thread ausiliari, con mutex separati per mappa,
-          lista client, punteggi e stato sessione.
+          lista client, punteggi, stato sessione e contesto Redis.
     \item \textbf{TUI senza ncurses}: l'interfaccia usa solo sequenze
           ANSI e caratteri UTF-8, senza dipendenze esterne, funzionante
           su qualsiasi terminale moderno.
@@ -423,7 +435,7 @@ Le principali scelte progettuali sono state:
           persiste le registrazioni finché il server Redis è attivo.
           In caso di indisponibilità il server funziona comunque (con
           autenticazione disabilitata).
-    \item \textbf{Test automatici}: suite di 49 test che coprono il parser
+    \item \textbf{Test automatici}: suite di test che coprono il parser
           comandi, lo stato client, il parser risposte, il protocollo e
           la logica di gioco (movimento, visibilità, pickup, uscita).
 \end{enumerate}
