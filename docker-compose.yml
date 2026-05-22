@@ -1,16 +1,26 @@
 services:
+  redis:
+    image: redis:7
+    container_name: labyrinth_redis
+    ports:
+      - "8080:8080"
+      - "6379:6379"
+
   server:
     build: .
     container_name: labyrinth_server
-    command: ./server_app 5000
-    ports:
-      - "5000:5000"
+    command: ./server_app 8080
+    network_mode: "service:redis"
     volumes:
       - ./logs:/app/logs
+    depends_on:
+      - redis
 
   client:
     build: .
     entrypoint: ["./client_app"]
+    profiles:
+      - client
     depends_on:
       - server
     stdin_open: true
