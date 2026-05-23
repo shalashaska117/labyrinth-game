@@ -1521,25 +1521,37 @@ int main(int argc, char *argv[]) {
         pthread_detach(periodic_thread);
     }
 
+#ifdef LSO_DEBUG
     printf("=== LSO Server ===\n");
     printf("Port:      %d\n", port);
     printf("Log file:  %s\n", log_path);
+#endif
 
     g_redis = redisConnect("127.0.0.1", 6379);
     if (g_redis == NULL || g_redis->err) {
         if (g_redis) {
+#ifdef LSO_DEBUG
             fprintf(stderr, "Redis:     error: %s\n", g_redis->errstr);
+#endif
             redisFree(g_redis);
         } else {
+#ifdef LSO_DEBUG
             fprintf(stderr, "Redis:     cannot allocate context\n");
+#endif
         }
         g_redis = NULL;
+#ifdef LSO_DEBUG
         fprintf(stderr, "Redis:     WARNING - auth unavailable\n");
+#endif
     } else {
+#ifdef LSO_DEBUG
         printf("Redis:     connected to 127.0.0.1:6379\n");
+#endif
     }
 
+#ifdef LSO_DEBUG
     printf("Server is running in LOBBY. Press Ctrl+C to stop.\n\n");
+#endif
 
     log_msg("SERVER STARTED in LOBBY");
 

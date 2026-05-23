@@ -3,7 +3,7 @@
 CC=gcc
 
 CFLAGS=-Wall -Wextra -pedantic -std=c11 -D_POSIX_C_SOURCE=200112L
-DEBUG_FLAGS=-g -O0
+DEBUG_FLAGS=-g -O0 -DLSO_DEBUG
 RELEASE_FLAGS=-O3
 COVERAGE_FLAGS=-g -O0 --coverage
 
