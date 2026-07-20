@@ -78,8 +78,16 @@ int log_msg(const char *message) {
     write_res = (write(log_fd, buf, (size_t)n) == (ssize_t)n) ? 0 : -1;
     pthread_mutex_unlock(&log_mutex);
 
+    /*
+     * The assignment requires the server to stay silent on stdout/stderr
+     * during normal operation (logging goes to the file above). The stderr
+     * echo is compiled in only for the debug build: make debug adds
+     * -DLSO_DEBUG, while make client, make server and make release stay silent.
+     */
+#ifdef LSO_DEBUG
     fprintf(stderr, "%s", buf);
     fflush(stderr);
+#endif
 
     return write_res;
 }
